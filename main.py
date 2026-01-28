@@ -160,8 +160,6 @@ dataset = Generic_MIL_Dataset(csv_path = os.path.join('dataset_csv', '%s.csv' % 
                               shuffle = False, 
                               seed = args.seed, 
                               print_info = True,
-                              # label_dict = {'0':0, '1':1}, # Is this needed?????
-                              label_dict = {'tumor':0, 'normal':1}, # Is this needed?????
                               patient_strat=False)
     
 if not os.path.isdir(args.results_dir):

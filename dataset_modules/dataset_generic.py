@@ -50,8 +50,6 @@ class Generic_WSI_Classification_Dataset(Dataset):
 			label_dict (dict): Dictionary with key, value pairs for converting str labels to int
 			ignore (list): List containing class labels to ignore
 		"""
-		self.label_dict = label_dict
-		self.num_classes = len(set(self.label_dict.values()))
 		self.seed = seed
 		self.print_info = print_info
 		self.patient_strat = patient_strat
@@ -63,7 +61,8 @@ class Generic_WSI_Classification_Dataset(Dataset):
 
 		slide_data = pd.read_csv(csv_path)
 		slide_data = self.filter_df(slide_data, filter_dict)
-		slide_data = self.df_prep(slide_data, self.label_dict, ignore, self.label_col)
+		slide_data, self.label_dict = self.df_prep(slide_data, label_dict, ignore, self.label_col)
+		self.num_classes = len(set(self.label_dict.values()))
 
 		###shuffle data
 		if shuffle:
@@ -112,14 +111,22 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		if label_col != 'label':
 			data['label'] = data[label_col].copy()
 
+		# Filter out ignored classes
 		mask = data['label'].isin(ignore)
 		data = data[~mask]
 		data.reset_index(drop=True, inplace=True)
+
+		# If no dict is provided, generate one automatically based on unique values
+		if not label_dict or label_dict == {}:
+			unique_labels = sorted(data['label'].unique())
+			label_dict = {val: i for i, val in enumerate(unique_labels)}
+			print(f"Automatically generated label_dict: {label_dict}")
+
 		for i in data.index:
 			key = data.loc[i, 'label']
 			data.at[i, 'label'] = label_dict[key]
 
-		return data
+		return data, label_dict # Return the dict so the class can store it
 
 	def filter_df(self, df, filter_dict={}):
 		if len(filter_dict) > 0:
