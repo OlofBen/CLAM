@@ -10,6 +10,9 @@ import argparse
 import pdb
 import pandas as pd
 
+from PIL import Image
+Image.MAX_IMAGE_PIXELS = None
+
 def stitching(file_path, downscale = 64):
 	start = time.time()
 	heatmap = StitchPatches(file_path, downscale=downscale, bg_color=(0,0,0), alpha=-1, draw_grid=False)
@@ -51,7 +54,7 @@ def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_d
 				  seg = False, save_mask = True, 
 				  stitch= False, 
 				  patch = False, auto_skip=True, process_list = None):
-	
+
 
 
 	slides = sorted(os.listdir(source))
@@ -59,11 +62,9 @@ def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_d
 
 	if process_list is None:
 		df = initialize_df(slides, seg_params, filter_params, vis_params, patch_params, save_patches=True)
-	
 	else:
 		df = pd.read_csv(process_list)
 		df = initialize_df(df, seg_params, filter_params, vis_params, patch_params, save_patches=True)
-
 
 	mask = df['process'] == 1
 	process_stack = df[mask]
@@ -97,7 +98,6 @@ def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_d
 			current_filter_params = filter_params.copy()
 			current_seg_params = seg_params.copy()
 			current_patch_params = patch_params.copy()
-			
 		else:
 			current_vis_params = {}
 			current_filter_params = {}
@@ -118,8 +118,7 @@ def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_d
 		if current_vis_params['vis_level'] < 0:
 			if len(WSI_object.level_dim) == 1:
 				current_vis_params['vis_level'] = 0
-			
-			else:	
+			else:
 				wsi = WSI_object.getOpenSlide()
 				best_level = wsi.get_best_level_for_downsample(64)
 				current_vis_params['vis_level'] = best_level
@@ -127,7 +126,6 @@ def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_d
 		if current_seg_params['seg_level'] < 0:
 			if len(WSI_object.level_dim) == 1:
 				current_seg_params['seg_level'] = 0
-			
 			else:
 				wsi = WSI_object.getOpenSlide()
 				best_level = wsi.get_best_level_for_downsample(64)
@@ -148,7 +146,7 @@ def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_d
 			current_seg_params['exclude_ids'] = []
 
 		w, h = WSI_object.level_dim[current_seg_params['seg_level']] 
-		if w * h > 1e8:
+		if w * h > 1e9:
 			print('level_dim {} x {} is likely too large for successful segmentation, aborting'.format(w, h))
 			df.loc[idx, 'status'] = 'failed_seg'
 			continue
@@ -216,6 +214,8 @@ parser.add_argument('--preset', default=None, type=str,
 					help='predefined profile of default segmentation and filter parameters (.csv)')
 parser.add_argument('--patch_level', type=int, default=0, 
 					help='downsample level at which to patch')
+parser.add_argument('--seg_level', type=int, default=-1, 
+					help='downsample level at which to segment tissue') # NEW ARGUMENT
 parser.add_argument('--custom_downsample', type= int, choices=[1,2], default=1, 
 					help='custom downscale when native downsample is not available (only tested w/ 2x downscale)')
 parser.add_argument('--process_list',  type = str, default=None,
@@ -230,7 +230,6 @@ if __name__ == '__main__':
 
 	if args.process_list:
 		process_list = os.path.join(args.save_dir, args.process_list)
-
 	else:
 		process_list = None
 
@@ -250,8 +249,7 @@ if __name__ == '__main__':
 		if key not in ['source']:
 			os.makedirs(val, exist_ok=True)
 
-
-	seg_params = {'seg_level': -1, 'sthresh': 8, 'mthresh': 7, 'close': 4, 'use_otsu': False,
+	seg_params = {'seg_level': int(args.seg_level), 'sthresh': 8, 'mthresh': 7, 'close': 4, 'use_otsu': False,
 				  'keep_ids': 'none', 'exclude_ids': 'none'}
 	filter_params = {'a_t':100, 'a_h': 16, 'max_n_holes':8 }
 	vis_params = {'vis_level': -1, 'line_thickness': 250}
@@ -273,7 +271,7 @@ if __name__ == '__main__':
 	
 	parameters = {'seg_params': seg_params,
 				  'filter_params': filter_params,
-	 			  'patch_params': patch_params,
+				  'patch_params': patch_params,
 				  'vis_params': vis_params}
 
 	print(parameters)
