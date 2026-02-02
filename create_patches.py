@@ -1,16 +1,18 @@
 # internal imports
-from wsi_core.WholeSlideImage import WholeSlideImage 
-from wsi_core.wsi_utils import StitchPatches
-from wsi_core.batch_process_utils import initialize_df
-# other imports
-import os
-import numpy as np
-import time
 import argparse
+import os
 import pdb
-import pandas as pd
+import time
+from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 
+import numpy as np
+import pandas as pd
 from PIL import Image
+from wsi_core.batch_process_utils import initialize_df
+from wsi_core.WholeSlideImage import WholeSlideImage
+from wsi_core.wsi_utils import StitchPatches
+
 Image.MAX_IMAGE_PIXELS = None
 
 def stitching(file_path, downscale = 64):
@@ -42,52 +44,33 @@ def patching(WSI_object, **kwargs):
 	patch_time_elapsed = time.time() - start_time
 	return file_path, patch_time_elapsed
 
-def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_dir, 
-				  patch_size = 256, step_size = 256, custom_downsample=1, 
-				  seg_params = {'seg_level': -1, 'sthresh': 8, 'mthresh': 7, 'close': 4, 'use_otsu': False,
-				  'keep_ids': 'none', 'exclude_ids': 'none'},
-				  filter_params = {'a_t':100, 'a_h': 16, 'max_n_holes':8 }, 
-				  vis_params = {'vis_level': -1, 'line_thickness': 250},
-				  patch_params = {'white_thresh': 5, 'black_thresh': 40, 'use_padding': True, 'contour_fn': 'four_pt'},
-				  patch_level = 0,
-				  use_default_params = False, 
-				  seg = False, save_mask = True, 
-				  stitch= False, 
-				  patch = False, auto_skip=True, process_list = None):
 
+def process_single_slide(idx, df, source, patch_save_dir, mask_save_dir, stitch_save_dir, 
+						 seg_params, filter_params, vis_params, patch_params, 
+						 patch_size, step_size, custom_downsample, patch_level, 
+						 use_default_params, seg, save_mask, stitch, patch, auto_skip):
 
+	slide = df.loc[idx, 'slide_id']
+	slide_id, _ = os.path.splitext(slide)
+	
+	# Status tracking (returned to main process)
+	result_status = {'idx': idx, 'status': 'processed', 'seg_t': -1, 'patch_t': -1, 'stitch_t': -1}
 
-	slides = sorted(os.listdir(source))
-	slides = [slide for slide in slides if os.path.isfile(os.path.join(source, slide))]
+	if auto_skip and os.path.isfile(os.path.join(patch_save_dir, slide_id + '.h5')):
+		result_status['status'] = 'already_exist'
+		return result_status
 
-	if process_list is None:
-		df = initialize_df(slides, seg_params, filter_params, vis_params, patch_params, save_patches=True)
-	else:
-		df = pd.read_csv(process_list)
-		df = initialize_df(df, seg_params, filter_params, vis_params, patch_params, save_patches=True)
+	try:
+		full_path = os.path.join(source, slide)
+		WSI_object = WholeSlideImage(full_path)
 
-	mask = df['process'] == 1
-	process_stack = df[mask]
-
-	total = len(process_stack)
-	seg_times = 0.
-	patch_times = 0.
-	stitch_times = 0.
-
-	for i in range(total):
-		df.to_csv(os.path.join(save_dir, 'process_list_autogen.csv'), index=False)
-		idx = process_stack.index[i]
-		slide = process_stack.loc[idx, 'slide_id']
-		print("\n\nprogress: {:.2f}, {}/{}".format(i/total, i, total))
-		print('processing {}'.format(slide))
-		
 		df.loc[idx, 'process'] = 0
 		slide_id, _ = os.path.splitext(slide)
 
 		if auto_skip and os.path.isfile(os.path.join(patch_save_dir, slide_id + '.h5')):
 			print('{} already exist in destination location, skipped'.format(slide_id))
 			df.loc[idx, 'status'] = 'already_exist'
-			continue
+			return
 
 		# Inialize WSI
 		full_path = os.path.join(source, slide)
@@ -149,7 +132,7 @@ def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_d
 		if w * h > 1e9:
 			print('level_dim {} x {} is likely too large for successful segmentation, aborting'.format(w, h))
 			df.loc[idx, 'status'] = 'failed_seg'
-			continue
+			return
 
 		if not process_list:
 			df.loc[idx, 'vis_level'] = current_vis_params['vis_level']
@@ -182,20 +165,98 @@ def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_d
 		print("stitching took {} seconds".format(stitch_time_elapsed))
 		df.loc[idx, 'status'] = 'processed'
 
-		seg_times += seg_time_elapsed
-		patch_times += patch_time_elapsed
-		stitch_times += stitch_time_elapsed
-
-	seg_times /= total
-	patch_times /= total
-	stitch_times /= total
-
-	df.to_csv(os.path.join(save_dir, 'process_list_autogen.csv'), index=False)
-	print("average segmentation time in s per slide: {}".format(seg_times))
-	print("average patching time in s per slide: {}".format(patch_times))
-	print("average stiching time in s per slide: {}".format(stitch_times))
+		# Update the result_status with actual times
+		result_status['seg_t'] = seg_time_elapsed
+		result_status['patch_t'] = patch_time_elapsed
+		result_status['stitch_t'] = stitch_time_elapsed
 		
+	except Exception as e:
+		print(f"Failed to process {slide}: {e}")
+		result_status['status'] = 'failed'
+		
+	return result_status
+
+def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_dir, 
+				  patch_size = 256, step_size = 256, custom_downsample=1, 
+				  seg_params = {'seg_level': -1, 'sthresh': 8, 'mthresh': 7, 'close': 4, 'use_otsu': False,
+				  'keep_ids': 'none', 'exclude_ids': 'none'},
+				  filter_params = {'a_t':100, 'a_h': 16, 'max_n_holes':8 }, 
+				  vis_params = {'vis_level': -1, 'line_thickness': 250},
+				  patch_params = {'white_thresh': 5, 'black_thresh': 40, 'use_padding': True, 'contour_fn': 'four_pt'},
+				  patch_level = 0,
+				  use_default_params = False, 
+				  seg = False, save_mask = True, 
+				  stitch= False, 
+				  patch = False, auto_skip=True, process_list = None, num_workers=128):
+
+	slides = sorted(os.listdir(source))
+	slides = [slide for slide in slides if os.path.isfile(os.path.join(source, slide))]
+
+	if process_list is None:
+		df = initialize_df(slides, seg_params, filter_params, vis_params, patch_params, save_patches=True)
+	else:
+		df = pd.read_csv(process_list)
+		df = initialize_df(df, seg_params, filter_params, vis_params, patch_params, save_patches=True)
+
+	mask = df['process'] == 1
+	process_stack = df[mask]
+
+	total = len(process_stack)
+	seg_times = 0.
+	patch_times = 0.
+	stitch_times = 0.
+
+	mask = df['process'] == 1
+	process_indices = df[mask].index.tolist()
+	
+	# Create a partial function with all arguments fixed except the index
+	worker_func = partial(process_single_slide, 
+						  df=df, source=source, patch_save_dir=patch_save_dir,
+						  mask_save_dir=mask_save_dir, stitch_save_dir=stitch_save_dir,
+						  seg_params=seg_params, filter_params=filter_params,
+						  vis_params=vis_params, patch_params=patch_params,
+						  patch_size=patch_size, step_size=step_size, 
+						  custom_downsample=custom_downsample, patch_level=patch_level,
+						  use_default_params=use_default_params, seg=seg, 
+						  save_mask=save_mask, stitch=stitch, patch=patch, 
+						  auto_skip=auto_skip)
+
+	print(f"Starting parallel processing with {num_workers} workers...")
+	
+	results = []
+	with ProcessPoolExecutor(max_workers=num_workers) as executor:
+		results = list(executor.map(worker_func, process_indices))
+
+	# Update the main dataframe and calculate averages
+	for res in results:
+		idx = res['idx']
+		df.loc[idx, 'status'] = res['status']
+		df.loc[idx, 'process'] = 0
+		# Only accumulate times if the process actually ran
+		if res['status'] == 'processed':
+			seg_times += max(0, res['seg_t'])
+			patch_times += max(0, res['patch_t'])
+			stitch_times += max(0, res['stitch_t'])
+			total_processed += 1
+
+	# Calculate averages based on how many slides actually ran
+	if total_processed > 0:
+		avg_seg = seg_times / total_processed
+		avg_patch = patch_times / total_processed
+		avg_stitch = stitch_times / total_processed
+	else:
+		avg_seg = avg_patch = avg_stitch = 0
+
+	# Final Save
+	df.to_csv(os.path.join(save_dir, 'process_list_autogen.csv'), index=False)
+
+	print(f"\nProcessing complete. Total slides processed: {total_processed}")
+	print(f"Average segmentation time: {avg_seg:.2f}s")
+	print(f"Average patching time: {avg_patch:.2f}s")
+	print(f"Average stitching time: {avg_stitch:.2f}s")
+
 	return seg_times, patch_times
+
 
 parser = argparse.ArgumentParser(description='seg and patch')
 parser.add_argument('--source', type = str,
@@ -249,7 +310,7 @@ if __name__ == '__main__':
 		if key not in ['source']:
 			os.makedirs(val, exist_ok=True)
 
-	seg_params = {'seg_level': int(args.seg_level), 'sthresh': 8, 'mthresh': 7, 'close': 4, 'use_otsu': False,
+	seg_params = {'seg_level': int(args.seg_level), 'sthresh': 12, 'mthresh': 7, 'close': 4, 'use_otsu': False,
 				  'keep_ids': 'none', 'exclude_ids': 'none'}
 	filter_params = {'a_t':100, 'a_h': 16, 'max_n_holes':8 }
 	vis_params = {'vis_level': -1, 'line_thickness': 250}
