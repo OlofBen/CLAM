@@ -63,7 +63,7 @@ if __name__ == '__main__':
 	bags_dataset = Dataset_All_Bags(csv_path)
 	
 	os.makedirs(args.feat_dir, exist_ok=True)
-	dest_files = os.listdir(args.feat_dir)
+	dest_files = os.listdir(os.path.join(args.feat_dir, 'pt_files'))
 
 	model, img_transforms = get_encoder(args.model_name, target_img_size=args.target_patch_size)		
 	model = model.to(device)
@@ -74,7 +74,10 @@ if __name__ == '__main__':
 
 	_ = model.eval()
 
-	loader_kwargs = {'num_workers': 8, 'pin_memory': True} if device.type == "cuda" else {}
+	loader_kwargs = {'num_workers': 32, 
+                  'pin_memory': True,
+                  'persistent_workers': True,
+                  } if device.type == "cuda" else {}
 	
 	total = len(bags_dataset)
 	for bag_candidate_idx in range(total):
