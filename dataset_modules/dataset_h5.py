@@ -16,14 +16,25 @@ class Whole_Slide_Bag(Dataset):
 			file_path (string): Path to the .h5 file containing patched data.
 			roi_transforms (callable, optional): Optional transform to be applied on a sample
 		"""
-		self.roi_transforms = img_transforms
+	def __init__(self, file_path, img_transforms=None):
 		self.file_path = file_path
-
+		self.roi_transforms = img_transforms
+		self.hdf5_file = None # Don't open yet
+		
 		with h5py.File(self.file_path, "r") as f:
-			dset = f['imgs']
-			self.length = len(dset)
+			self.length = min(len(f['imgs']), len(f['coords']))
 
-		self.summary()
+	def __getitem__(self, idx):
+		if self.hdf5_file is None:
+			# Open once per worker process
+			self.hdf5_file = h5py.File(self.file_path, 'r')
+			
+		img = self.hdf5_file['imgs'][idx]
+		coord = self.hdf5_file['coords'][idx]
+		
+		img = Image.fromarray(img)
+		img = self.roi_transforms(img)
+		return {'img': img, 'coord': coord}
 			
 	def __len__(self):
 		return self.length
@@ -36,14 +47,6 @@ class Whole_Slide_Bag(Dataset):
 
 		print('transformations:', self.roi_transforms)
 
-	def __getitem__(self, idx):
-		with h5py.File(self.file_path,'r') as hdf5_file:
-			img = hdf5_file['imgs'][idx]
-			coord = hdf5_file['coords'][idx]
-		
-		img = Image.fromarray(img)
-		img = self.roi_transforms(img)
-		return {'img': img, 'coord': coord}
 
 class Whole_Slide_Bag_FP(Dataset):
 	def __init__(self,
@@ -98,7 +101,4 @@ class Dataset_All_Bags(Dataset):
 
 	def __getitem__(self, idx):
 		return self.df['slide_id'][idx]
-
-
-
 
