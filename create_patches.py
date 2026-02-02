@@ -58,6 +58,7 @@ def process_single_slide(idx, df, source, patch_save_dir, mask_save_dir, stitch_
 
 	if auto_skip and os.path.isfile(os.path.join(patch_save_dir, slide_id + '.h5')):
 		result_status['status'] = 'already_exist'
+		print(f"Skipping slide {slide_id}, exists")
 		return result_status
 
 	try:
@@ -188,7 +189,7 @@ def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_d
 				  use_default_params = False, 
 				  seg = False, save_mask = True, 
 				  stitch= False, 
-				  patch = False, auto_skip=True, process_list = None, num_workers=128):
+				  patch = False, auto_skip=True, process_list = None, num_workers=64):
 
 	slides = sorted(os.listdir(source))
 	slides = [slide for slide in slides if os.path.isfile(os.path.join(source, slide))]
@@ -269,7 +270,7 @@ parser.add_argument('--patch_size', type = int, default=256,
 parser.add_argument('--patch', default=False, action='store_true')
 parser.add_argument('--seg', default=False, action='store_true')
 parser.add_argument('--stitch', default=False, action='store_true')
-parser.add_argument('--no_auto_skip', default=True, action='store_false')
+parser.add_argument('--auto_skip', default=True, action='store_false')
 parser.add_argument('--save_dir', type = str,
 					help='directory to save processed data')
 parser.add_argument('--preset', default=None, type=str,
@@ -343,4 +344,4 @@ if __name__ == '__main__':
 											seg = args.seg,  use_default_params=False, save_mask = True, 
 											stitch= args.stitch, custom_downsample = args.custom_downsample, 
 											patch_level=args.patch_level, patch = args.patch,
-											process_list = process_list, auto_skip=args.no_auto_skip)
+											process_list = process_list, auto_skip=args.auto_skip)
