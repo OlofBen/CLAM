@@ -44,6 +44,22 @@ def compute_w_loader(output_path, loader, model, verbose = 0):
 	return output_path
 
 
+def fetch_dataset(bag_candidate_idx, args, loader_kwargs):
+		slide_id = bags_dataset[bag_candidate_idx].split(args.slide_ext)[0]
+		bag_name = slide_id + '.h5'
+		bag_candidate = os.path.join(args.data_dir, 'patches', bag_name)
+
+		print('\nprogress: {}/{}'.format(bag_candidate_idx, total))
+		print(bag_name)
+		if not args.no_auto_skip and slide_id+'.pt' in dest_files:
+			print('skipped {}'.format(slide_id))
+			return None 
+
+		file_path = bag_candidate
+
+		dataset = Whole_Slide_Bag(file_path=file_path, img_transforms=img_transforms)
+		return DataLoader(dataset=dataset, batch_size=args.batch_size, **loader_kwargs), bag_name 
+
 parser = argparse.ArgumentParser(description='Feature Extraction')
 parser.add_argument('--data_dir', type=str)
 parser.add_argument('--csv_path', type=str)
@@ -76,29 +92,24 @@ if __name__ == '__main__':
 
 	_ = model.eval()
 
-	loader_kwargs = {'num_workers': 32, 
-                  'pin_memory': True,
-                  'persistent_workers': True,
-                  } if device.type == "cuda" else {}
+	loader_kwargs = {'num_workers': 16,
+                  'prefetch_factor': 5, 
+				  'pin_memory': True,
+				  'persistent_workers': True,
+				  } if device.type == "cuda" else {}
 	
 	total = len(bags_dataset)
+	num_prefetch = 10
+	data_loaders = [fetch_dataset(idx, args, loader_kwargs) for idx in range(num_prefetch)]
 	for bag_candidate_idx in range(total):
-		slide_id = bags_dataset[bag_candidate_idx].split(args.slide_ext)[0]
-		bag_name = slide_id + '.h5'
-		bag_candidate = os.path.join(args.data_dir, 'patches', bag_name)
-
-		print('\nprogress: {}/{}'.format(bag_candidate_idx, total))
-		print(bag_name)
-		if not args.no_auto_skip and slide_id+'.pt' in dest_files:
-			print('skipped {}'.format(slide_id))
-			continue 
-
+		
+		loader, bag_name = data_loaders.pop(0)
+		if bag_candidate_idx + num_prefetch < total:
+			data_loaders.append(fetch_dataset(bag_candidate_idx + num_prefetch, args, loader_kwargs) )
+		if loader is None: 
+			continue
 		output_path = os.path.join(args.feat_dir, 'h5_files', bag_name)
-		file_path = bag_candidate
 		time_start = time.time()
-
-		dataset = Whole_Slide_Bag(file_path=file_path, img_transforms=img_transforms)
-		loader = DataLoader(dataset=dataset, batch_size=args.batch_size, **loader_kwargs)
 		output_file_path = compute_w_loader(output_path, loader = loader, model = model, verbose = 1)
 
 		time_elapsed = time.time() - time_start
