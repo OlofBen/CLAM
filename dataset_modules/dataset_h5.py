@@ -1,3 +1,4 @@
+from functools import cache
 import numpy as np
 import pandas as pd
 
@@ -20,9 +21,6 @@ class Whole_Slide_Bag(Dataset):
 		self.file_path = file_path
 		self.roi_transforms = img_transforms
 		self.hdf5_file = None # Don't open yet
-		
-		with h5py.File(self.file_path, "r") as f:
-			self.length = min(len(f['imgs']), len(f['coords']))
 
 	def __getitem__(self, idx):
 		if self.hdf5_file is None:
@@ -35,9 +33,11 @@ class Whole_Slide_Bag(Dataset):
 		img = Image.fromarray(img)
 		img = self.roi_transforms(img)
 		return {'img': img, 'coord': coord}
-			
+
+	@cache
 	def __len__(self):
-		return self.length
+		with h5py.File(self.file_path, "r") as f:
+			return min(len(f['imgs']), len(f['coords']))
 
 	def summary(self):
 		with h5py.File(self.file_path, "r") as hdf5_file:

@@ -24,7 +24,7 @@ def compute_w_loader(output_path, loader, model, verbose = 0):
 		verbose: level of feedback
 	"""
 	if verbose > 0:
-		print('processing {}: total of {} batches'.format(file_path,len(loader)))
+		print('processing {}: total of {} batches'.format(output_path,len(loader)))
 
 	mode = 'w'
 	for count, data in enumerate(tqdm(loader)):
@@ -92,14 +92,14 @@ if __name__ == '__main__':
 
 	_ = model.eval()
 
-	loader_kwargs = {'num_workers': 16,
+	loader_kwargs = {'num_workers': 8,
                   'prefetch_factor': 5, 
 				  'pin_memory': True,
 				  'persistent_workers': True,
 				  } if device.type == "cuda" else {}
 	
 	total = len(bags_dataset)
-	num_prefetch = 10
+	num_prefetch = 5
 	data_loaders = [fetch_dataset(idx, args, loader_kwargs) for idx in range(num_prefetch)]
 	for bag_candidate_idx in range(total):
 		
@@ -108,6 +108,7 @@ if __name__ == '__main__':
 			data_loaders.append(fetch_dataset(bag_candidate_idx + num_prefetch, args, loader_kwargs) )
 		if loader is None: 
 			continue
+
 		output_path = os.path.join(args.feat_dir, 'h5_files', bag_name)
 		time_start = time.time()
 		output_file_path = compute_w_loader(output_path, loader = loader, model = model, verbose = 1)
