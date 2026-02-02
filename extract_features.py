@@ -63,6 +63,8 @@ if __name__ == '__main__':
 	bags_dataset = Dataset_All_Bags(csv_path)
 	
 	os.makedirs(args.feat_dir, exist_ok=True)
+	os.makedirs(os.path.join(args.feat_dir, 'pt_files'), exist_ok=True)
+	os.makedirs(os.path.join(args.feat_dir, 'h5_files'), exist_ok=True)
 	dest_files = os.listdir(os.path.join(args.feat_dir, 'pt_files'))
 
 	model, img_transforms = get_encoder(args.model_name, target_img_size=args.target_patch_size)		
