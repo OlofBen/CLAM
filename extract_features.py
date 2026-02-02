@@ -1,20 +1,17 @@
 import time
 import os
 import argparse
-import pdb
 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from PIL import Image
 import h5py
-import openslide
 
 from tqdm import tqdm
 import numpy as np
 
 from utils.file_utils import save_hdf5
-from dataset_modules.dataset_h5 import Dataset_All_Bags, Whole_Slide_Bag, get_eval_transforms
+from dataset_modules.dataset_h5 import Dataset_All_Bags, Whole_Slide_Bag
 from models import get_encoder
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -70,6 +67,11 @@ if __name__ == '__main__':
 
 	model, img_transforms = get_encoder(args.model_name, target_img_size=args.target_patch_size)		
 	model = model.to(device)
+ 
+	if torch.cuda.device_count() > 1:
+		print(f"Using {torch.cuda.device_count()} GPUs!")
+		model = nn.DataParallel(model)
+
 	_ = model.eval()
 
 	loader_kwargs = {'num_workers': 8, 'pin_memory': True} if device.type == "cuda" else {}

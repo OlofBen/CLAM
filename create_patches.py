@@ -160,6 +160,7 @@ def process_single_slide(idx, df, source, patch_save_dir, mask_save_dir, stitch_
 			stitch_path = os.path.join(stitch_save_dir, slide_id+'.png')
 			heatmap.save(stitch_path)
 
+		print(f"Processed {slide}")
 		print("segmentation took {} seconds".format(seg_time_elapsed))
 		print("patching took {} seconds".format(patch_time_elapsed))
 		print("stitching took {} seconds".format(stitch_time_elapsed))
@@ -178,9 +179,9 @@ def process_single_slide(idx, df, source, patch_save_dir, mask_save_dir, stitch_
 
 def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_dir, 
 				  patch_size = 256, step_size = 256, custom_downsample=1, 
-				  seg_params = {'seg_level': -1, 'sthresh': 8, 'mthresh': 7, 'close': 4, 'use_otsu': False,
+				  seg_params = {'seg_level': -1, 'sthresh': 130, 'mthresh': 5, 'close': 4, 'use_otsu': False,
 				  'keep_ids': 'none', 'exclude_ids': 'none'},
-				  filter_params = {'a_t':100, 'a_h': 16, 'max_n_holes':8 }, 
+				  filter_params = {'a_t':25, 'a_h': 16, 'max_n_holes':8 }, 
 				  vis_params = {'vis_level': -1, 'line_thickness': 250},
 				  patch_params = {'white_thresh': 5, 'black_thresh': 40, 'use_padding': True, 'contour_fn': 'four_pt'},
 				  patch_level = 0,
@@ -226,7 +227,7 @@ def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_d
 	results = []
 	with ProcessPoolExecutor(max_workers=num_workers) as executor:
 		results = list(executor.map(worker_func, process_indices))
-
+	total_processed = 0
 	# Update the main dataframe and calculate averages
 	for res in results:
 		idx = res['idx']
@@ -310,9 +311,9 @@ if __name__ == '__main__':
 		if key not in ['source']:
 			os.makedirs(val, exist_ok=True)
 
-	seg_params = {'seg_level': int(args.seg_level), 'sthresh': 12, 'mthresh': 7, 'close': 4, 'use_otsu': False,
+	seg_params = {'seg_level': int(args.seg_level), 'sthresh': 12, 'mthresh': 5, 'close': 4, 'use_otsu': False,
 				  'keep_ids': 'none', 'exclude_ids': 'none'}
-	filter_params = {'a_t':100, 'a_h': 16, 'max_n_holes':8 }
+	filter_params = {'a_t':20, 'a_h': 16, 'max_n_holes':8 }
 	vis_params = {'vis_level': -1, 'line_thickness': 250}
 	patch_params = {'white_thresh': 5, 'black_thresh': 40, 'use_padding': True, 'contour_fn': 'four_pt'}
 
