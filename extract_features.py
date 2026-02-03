@@ -48,12 +48,15 @@ def fetch_dataset(bag_candidate_idx, args, loader_kwargs):
 		slide_id = bags_dataset[bag_candidate_idx].split(args.slide_ext)[0]
 		bag_name = slide_id + '.h5'
 		bag_candidate = os.path.join(args.data_dir, 'patches', bag_name)
-
+  
 		print('\nprogress: {}/{}'.format(bag_candidate_idx, total))
 		print(bag_name)
+		if not os.path.exists(bag_candidate):
+			print(f'Warning: {bag_name} not found at {bag_candidate}')
+			return None, bag_name
 		if not args.no_auto_skip and slide_id+'.pt' in dest_files:
 			print('skipped {}'.format(slide_id))
-			return None 
+			return None, bag_name
 
 		file_path = bag_candidate
 
@@ -93,7 +96,7 @@ if __name__ == '__main__':
 	_ = model.eval()
 
 	loader_kwargs = {'num_workers': 8,
-                  'prefetch_factor': 5, 
+				  'prefetch_factor': 5, 
 				  'pin_memory': True,
 				  'persistent_workers': True,
 				  } if device.type == "cuda" else {}
@@ -102,24 +105,26 @@ if __name__ == '__main__':
 	num_prefetch = 5
 	data_loaders = [fetch_dataset(idx, args, loader_kwargs) for idx in range(num_prefetch)]
 	for bag_candidate_idx in range(total):
-		
-		loader, bag_name = data_loaders.pop(0)
-		if bag_candidate_idx + num_prefetch < total:
-			data_loaders.append(fetch_dataset(bag_candidate_idx + num_prefetch, args, loader_kwargs) )
-		if loader is None: 
-			continue
+		try: 
+			loader, bag_name = data_loaders.pop(0)
+			if bag_candidate_idx + num_prefetch < total:
+				data_loaders.append(fetch_dataset(bag_candidate_idx + num_prefetch, args, loader_kwargs) )
+			if loader is None: 
+				continue
 
-		output_path = os.path.join(args.feat_dir, 'h5_files', bag_name)
-		time_start = time.time()
-		output_file_path = compute_w_loader(output_path, loader = loader, model = model, verbose = 1)
+			output_path = os.path.join(args.feat_dir, 'h5_files', bag_name)
+			time_start = time.time()
+			output_file_path = compute_w_loader(output_path, loader = loader, model = model, verbose = 1)
 
-		time_elapsed = time.time() - time_start
-		print('\ncomputing features for {} took {} s'.format(output_file_path, time_elapsed))
-		with h5py.File(output_file_path, "r") as file:
-			features = file['features'][:]
-			print('features size: ', features.shape)
-			print('coordinates size: ', file['coords'].shape)
+			time_elapsed = time.time() - time_start
+			print('\ncomputing features for {} took {} s'.format(output_file_path, time_elapsed))
+			with h5py.File(output_file_path, "r") as file:
+				features = file['features'][:]
+				print('features size: ', features.shape)
+				print('coordinates size: ', file['coords'].shape)
 
-		features = torch.from_numpy(features)
-		bag_base, _ = os.path.splitext(bag_name)
-		torch.save(features, os.path.join(args.feat_dir, 'pt_files', bag_base+'.pt'))
+			features = torch.from_numpy(features)
+			bag_base, _ = os.path.splitext(bag_name)
+			torch.save(features, os.path.join(args.feat_dir, 'pt_files', bag_base+'.pt'))
+		except Exception as e: 
+			print(f"{bag_candidate_idx} got error {e}")
