@@ -96,7 +96,7 @@ if __name__ == '__main__':
 	_ = model.eval()
 
 	loader_kwargs = {'num_workers': 4,
-				  'prefetch_factor': 2, 
+				  'prefetch_factor': 4, 
 				  'pin_memory': True,
 				  'persistent_workers': True,
 				  } if device.type == "cuda" else {}
