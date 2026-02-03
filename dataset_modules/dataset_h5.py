@@ -25,7 +25,7 @@ class Whole_Slide_Bag(Dataset):
 	def __getitem__(self, idx):
 		if self.hdf5_file is None:
 			# Open once per worker process
-			self.hdf5_file = h5py.File(self.file_path, 'r')
+			self.hdf5_file = h5py.File(self.file_path, 'r', driver='core', backing_store=False)
 			
 		img = self.hdf5_file['imgs'][idx]
 		coord = self.hdf5_file['coords'][idx]

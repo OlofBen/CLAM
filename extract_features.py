@@ -95,14 +95,14 @@ if __name__ == '__main__':
 
 	_ = model.eval()
 
-	loader_kwargs = {'num_workers': 8,
-				  'prefetch_factor': 5, 
+	loader_kwargs = {'num_workers': 4,
+				  'prefetch_factor': 2, 
 				  'pin_memory': True,
 				  'persistent_workers': True,
 				  } if device.type == "cuda" else {}
 	
 	total = len(bags_dataset)
-	num_prefetch = 5
+	num_prefetch = 3
 	data_loaders = [fetch_dataset(idx, args, loader_kwargs) for idx in range(num_prefetch)]
 	for bag_candidate_idx in range(total):
 		try: 
