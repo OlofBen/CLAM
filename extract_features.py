@@ -16,7 +16,7 @@ from models import get_encoder
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-def compute_w_loader(output_path, loader, model, verbose = 0):
+def compute_w_loader(bag_name, loader, model, verbose = 0):
 	"""
 	args:
 		output_path: directory to save computed features (.h5 file)
@@ -24,24 +24,18 @@ def compute_w_loader(output_path, loader, model, verbose = 0):
 		verbose: level of feedback
 	"""
 	if verbose > 0:
-		print('processing {}: total of {} batches'.format(output_path,len(loader)))
-
-	mode = 'w'
+		print('processing {}: total of {} batches'.format(bag_name,len(loader)))
+	all_features = []
 	for count, data in enumerate(tqdm(loader)):
 		with torch.inference_mode():	
 			batch = data['img']
-			coords = data['coord'].numpy().astype(np.int32)
 			batch = batch.to(device, non_blocking=True)
 			
 			features = model(batch)
-			
-			features = features.cpu().numpy()
+			all_features.append(features.cpu())
 
-			asset_dict = {'features': features, 'coords': coords}
-			save_hdf5(output_path, asset_dict, attr_dict= None, mode=mode)
-			mode = 'a'
 	
-	return output_path
+	return torch.cat(all_features)
 
 
 def fetch_dataset(bag_candidate_idx, args, loader_kwargs):
@@ -112,18 +106,12 @@ if __name__ == '__main__':
 			if loader is None: 
 				continue
 
-			output_path = os.path.join(args.feat_dir, 'h5_files', bag_name)
 			time_start = time.time()
-			output_file_path = compute_w_loader(output_path, loader = loader, model = model, verbose = 1)
+			features = compute_w_loader(bag_name=bag_name, loader = loader, model = model, verbose = 1)
 
 			time_elapsed = time.time() - time_start
-			print('\ncomputing features for {} took {} s'.format(output_file_path, time_elapsed))
-			with h5py.File(output_file_path, "r") as file:
-				features = file['features'][:]
-				print('features size: ', features.shape)
-				print('coordinates size: ', file['coords'].shape)
-
-			features = torch.from_numpy(features)
+			print('\ncomputing features for {} took {} s'.format(bag_name, time_elapsed))
+			
 			bag_base, _ = os.path.splitext(bag_name)
 			torch.save(features, os.path.join(args.feat_dir, 'pt_files', bag_base+'.pt'))
 		except Exception as e: 
