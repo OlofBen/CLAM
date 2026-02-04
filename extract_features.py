@@ -1,20 +1,17 @@
 import time
 import os
 import argparse
-import pdb
 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from PIL import Image
 import h5py
-import openslide
 
 from tqdm import tqdm
 import numpy as np
 
 from utils.file_utils import save_hdf5
-from dataset_modules.dataset_h5 import Dataset_All_Bags, Whole_Slide_Bag, get_eval_transforms
+from dataset_modules.dataset_h5 import Dataset_All_Bags, Whole_Slide_Bag
 from models import get_encoder
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -27,7 +24,7 @@ def compute_w_loader(output_path, loader, model, verbose = 0):
 		verbose: level of feedback
 	"""
 	if verbose > 0:
-		print('processing {}: total of {} batches'.format(file_path,len(loader)))
+		print('processing {}: total of {} batches'.format(output_path,len(loader)))
 
 	mode = 'w'
 	for count, data in enumerate(tqdm(loader)):
@@ -46,6 +43,25 @@ def compute_w_loader(output_path, loader, model, verbose = 0):
 	
 	return output_path
 
+
+def fetch_dataset(bag_candidate_idx, args, loader_kwargs):
+		slide_id = bags_dataset[bag_candidate_idx].split(args.slide_ext)[0]
+		bag_name = slide_id + '.h5'
+		bag_candidate = os.path.join(args.data_dir, 'patches', bag_name)
+  
+		print('\nprogress: {}/{}'.format(bag_candidate_idx, total))
+		print(bag_name)
+		if not os.path.exists(bag_candidate):
+			print(f'Warning: {bag_name} not found at {bag_candidate}')
+			return None, bag_name
+		if not args.no_auto_skip and slide_id+'.pt' in dest_files:
+			print('skipped {}'.format(slide_id))
+			return None, bag_name
+
+		file_path = bag_candidate
+
+		dataset = Whole_Slide_Bag(file_path=file_path, img_transforms=img_transforms)
+		return DataLoader(dataset=dataset, batch_size=args.batch_size, **loader_kwargs), bag_name 
 
 parser = argparse.ArgumentParser(description='Feature Extraction')
 parser.add_argument('--data_dir', type=str)
@@ -66,41 +82,49 @@ if __name__ == '__main__':
 	bags_dataset = Dataset_All_Bags(csv_path)
 	
 	os.makedirs(args.feat_dir, exist_ok=True)
-	dest_files = os.listdir(args.feat_dir)
+	os.makedirs(os.path.join(args.feat_dir, 'pt_files'), exist_ok=True)
+	os.makedirs(os.path.join(args.feat_dir, 'h5_files'), exist_ok=True)
+	dest_files = os.listdir(os.path.join(args.feat_dir, 'pt_files'))
 
 	model, img_transforms = get_encoder(args.model_name, target_img_size=args.target_patch_size)		
 	model = model.to(device)
+ 
+	if torch.cuda.device_count() > 1:
+		print(f"Using {torch.cuda.device_count()} GPUs!")
+		model = nn.DataParallel(model)
+
 	_ = model.eval()
 
-	loader_kwargs = {'num_workers': 8, 'pin_memory': True} if device.type == "cuda" else {}
+	loader_kwargs = {'num_workers': 4,
+				  'prefetch_factor': 4, 
+				  'pin_memory': True,
+				  'persistent_workers': True,
+				  } if device.type == "cuda" else {}
 	
 	total = len(bags_dataset)
+	num_prefetch = 3
+	data_loaders = [fetch_dataset(idx, args, loader_kwargs) for idx in range(num_prefetch)]
 	for bag_candidate_idx in range(total):
-		slide_id = bags_dataset[bag_candidate_idx].split(args.slide_ext)[0]
-		bag_name = slide_id + '.h5'
-		bag_candidate = os.path.join(args.data_dir, 'patches', bag_name)
+		try: 
+			loader, bag_name = data_loaders.pop(0)
+			if bag_candidate_idx + num_prefetch < total:
+				data_loaders.append(fetch_dataset(bag_candidate_idx + num_prefetch, args, loader_kwargs) )
+			if loader is None: 
+				continue
 
-		print('\nprogress: {}/{}'.format(bag_candidate_idx, total))
-		print(bag_name)
-		if not args.no_auto_skip and slide_id+'.pt' in dest_files:
-			print('skipped {}'.format(slide_id))
-			continue 
+			output_path = os.path.join(args.feat_dir, 'h5_files', bag_name)
+			time_start = time.time()
+			output_file_path = compute_w_loader(output_path, loader = loader, model = model, verbose = 1)
 
-		output_path = os.path.join(args.feat_dir, 'h5_files', bag_name)
-		file_path = bag_candidate
-		time_start = time.time()
+			time_elapsed = time.time() - time_start
+			print('\ncomputing features for {} took {} s'.format(output_file_path, time_elapsed))
+			with h5py.File(output_file_path, "r") as file:
+				features = file['features'][:]
+				print('features size: ', features.shape)
+				print('coordinates size: ', file['coords'].shape)
 
-		dataset = Whole_Slide_Bag(file_path=file_path, img_transforms=img_transforms)
-		loader = DataLoader(dataset=dataset, batch_size=args.batch_size, **loader_kwargs)
-		output_file_path = compute_w_loader(output_path, loader = loader, model = model, verbose = 1)
-
-		time_elapsed = time.time() - time_start
-		print('\ncomputing features for {} took {} s'.format(output_file_path, time_elapsed))
-		with h5py.File(output_file_path, "r") as file:
-			features = file['features'][:]
-			print('features size: ', features.shape)
-			print('coordinates size: ', file['coords'].shape)
-
-		features = torch.from_numpy(features)
-		bag_base, _ = os.path.splitext(bag_name)
-		torch.save(features, os.path.join(args.feat_dir, 'pt_files', bag_base+'.pt'))
+			features = torch.from_numpy(features)
+			bag_base, _ = os.path.splitext(bag_name)
+			torch.save(features, os.path.join(args.feat_dir, 'pt_files', bag_base+'.pt'))
+		except Exception as e: 
+			print(f"{bag_candidate_idx} got error {e}")
