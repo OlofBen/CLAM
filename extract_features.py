@@ -5,7 +5,6 @@ import argparse
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-import h5py
 
 from tqdm import tqdm
 import numpy as np
@@ -27,14 +26,12 @@ def compute_w_loader(bag_name, loader, model, verbose = 0):
 		print('processing {}: total of {} batches'.format(bag_name,len(loader)))
 	all_features = []
 	for count, data in enumerate(tqdm(loader)):
-		with torch.inference_mode():	
-			batch = data['img']
-			batch = batch.to(device, non_blocking=True)
-			
-			features = model(batch)
+		with torch.inference_mode():
+			data = data.to(device, non_blocking=True)
+			features = model(data)
 			all_features.append(features.cpu())
 
-	
+
 	return torch.cat(all_features)
 
 
@@ -42,7 +39,7 @@ def fetch_dataset(bag_candidate_idx, args, loader_kwargs):
 		slide_id = bags_dataset[bag_candidate_idx].split(args.slide_ext)[0]
 		bag_name = slide_id + '.h5'
 		bag_candidate = os.path.join(args.data_dir, 'patches', bag_name)
-  
+
 		print('\nprogress: {}/{}'.format(bag_candidate_idx, total))
 		print(bag_name)
 		if not os.path.exists(bag_candidate):
@@ -55,7 +52,7 @@ def fetch_dataset(bag_candidate_idx, args, loader_kwargs):
 		file_path = bag_candidate
 
 		dataset = Whole_Slide_Bag(file_path=file_path, img_transforms=img_transforms)
-		return DataLoader(dataset=dataset, batch_size=args.batch_size, **loader_kwargs), bag_name 
+		return DataLoader(dataset=dataset, batch_size=args.batch_size, **loader_kwargs), bag_name
 
 parser = argparse.ArgumentParser(description='Feature Extraction')
 parser.add_argument('--data_dir', type=str)
@@ -74,36 +71,35 @@ if __name__ == '__main__':
 	print('initializing dataset')
 	csv_path = args.csv_path
 	bags_dataset = Dataset_All_Bags(csv_path)
-	
+
 	os.makedirs(args.feat_dir, exist_ok=True)
 	os.makedirs(os.path.join(args.feat_dir, 'pt_files'), exist_ok=True)
-	os.makedirs(os.path.join(args.feat_dir, 'h5_files'), exist_ok=True)
 	dest_files = os.listdir(os.path.join(args.feat_dir, 'pt_files'))
 
-	model, img_transforms = get_encoder(args.model_name, target_img_size=args.target_patch_size)		
+	model, img_transforms = get_encoder(args.model_name, target_img_size=args.target_patch_size)
 	model = model.to(device)
- 
+
 	if torch.cuda.device_count() > 1:
 		print(f"Using {torch.cuda.device_count()} GPUs!")
 		model = nn.DataParallel(model)
 
 	_ = model.eval()
 
-	loader_kwargs = {'num_workers': 4,
-				  'prefetch_factor': 4, 
+	loader_kwargs = {'num_workers': 8,
+				  'prefetch_factor': 4,
 				  'pin_memory': True,
 				  'persistent_workers': True,
 				  } if device.type == "cuda" else {}
-	
+
 	total = len(bags_dataset)
 	num_prefetch = 3
 	data_loaders = [fetch_dataset(idx, args, loader_kwargs) for idx in range(num_prefetch)]
 	for bag_candidate_idx in range(total):
-		try: 
+		try:
 			loader, bag_name = data_loaders.pop(0)
 			if bag_candidate_idx + num_prefetch < total:
 				data_loaders.append(fetch_dataset(bag_candidate_idx + num_prefetch, args, loader_kwargs) )
-			if loader is None: 
+			if loader is None:
 				continue
 
 			time_start = time.time()
@@ -111,8 +107,8 @@ if __name__ == '__main__':
 
 			time_elapsed = time.time() - time_start
 			print('\ncomputing features for {} took {} s'.format(bag_name, time_elapsed))
-			
+
 			bag_base, _ = os.path.splitext(bag_name)
 			torch.save(features, os.path.join(args.feat_dir, 'pt_files', bag_base+'.pt'))
-		except Exception as e: 
+		except Exception as e:
 			print(f"{bag_candidate_idx} got error {e}")
