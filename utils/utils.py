@@ -15,7 +15,6 @@ import torch.nn.functional as F
 import math
 from itertools import islice
 import collections
-device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class SubsetSequentialSampler(Sampler):
 	"""Samples elements sequentially from a given list of indices, without replacement.
@@ -42,32 +41,40 @@ def collate_features(batch):
 	coords = np.vstack([item[1] for item in batch])
 	return [img, coords]
 
-
 def get_simple_loader(dataset, batch_size=1, num_workers=1):
-	kwargs = {'num_workers': 4, 'pin_memory': False, 'num_workers': num_workers} if device.type == "cuda" else {}
-	loader = DataLoader(dataset, batch_size=batch_size, sampler = sampler.SequentialSampler(dataset), collate_fn = collate_MIL, **kwargs)
-	return loader 
+    # Check availability locally instead of using a global variable
+    cuda_available = torch.cuda.is_available()
+    kwargs = {'num_workers': num_workers, 'pin_memory': False} if cuda_available else {}
+    
+    loader = DataLoader(dataset, batch_size=batch_size, sampler = sampler.SequentialSampler(dataset), collate_fn = collate_MIL, **kwargs)
+    return loader 
 
 def get_split_loader(split_dataset, training = False, testing = False, weighted = False):
-	"""
-		return either the validation loader or training loader 
-	"""
-	kwargs = {'num_workers': 4} if device.type == "cuda" else {}
-	if not testing:
-		if training:
-			if weighted:
-				weights = make_weights_for_balanced_classes_split(split_dataset)
-				loader = DataLoader(split_dataset, batch_size=1, sampler = WeightedRandomSampler(weights, len(weights)), collate_fn = collate_MIL, **kwargs)	
-			else:
-				loader = DataLoader(split_dataset, batch_size=1, sampler = RandomSampler(split_dataset), collate_fn = collate_MIL, **kwargs)
-		else:
-			loader = DataLoader(split_dataset, batch_size=1, sampler = SequentialSampler(split_dataset), collate_fn = collate_MIL, **kwargs)
-	
-	else:
-		ids = np.random.choice(np.arange(len(split_dataset), int(len(split_dataset)*0.1)), replace = False)
-		loader = DataLoader(split_dataset, batch_size=1, sampler = SubsetSequentialSampler(ids), collate_fn = collate_MIL, **kwargs )
+    """
+        return either the validation loader or training loader 
+    """
+    # 2. Use a local check for CUDA
+    cuda_available = torch.cuda.is_available()
 
-	return loader
+    # Using 2 workers is plenty since features are in shared RAM cache
+    kwargs = {'num_workers': 2, 'pin_memory': False} if cuda_available else {}
+
+    if not testing:
+        if training:
+            if weighted:
+                weights = make_weights_for_balanced_classes_split(split_dataset)
+                loader = DataLoader(split_dataset, batch_size=1, sampler = WeightedRandomSampler(weights, len(weights)), collate_fn = collate_MIL, **kwargs)    
+            else:
+                loader = DataLoader(split_dataset, batch_size=1, sampler = RandomSampler(split_dataset), collate_fn = collate_MIL, **kwargs)
+        else:
+            loader = DataLoader(split_dataset, batch_size=1, sampler = SequentialSampler(split_dataset), collate_fn = collate_MIL, **kwargs)
+
+    else:
+        subset_size = max(1, int(len(split_dataset) * 0.1))
+        ids = np.random.choice(np.arange(len(split_dataset)), subset_size, replace = False)
+        loader = DataLoader(split_dataset, batch_size=1, sampler = SubsetSequentialSampler(ids), collate_fn = collate_MIL, **kwargs )
+
+    return loader
 
 def get_optim(model, args):
 	if args.opt == "adam":

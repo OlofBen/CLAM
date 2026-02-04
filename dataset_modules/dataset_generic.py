@@ -228,8 +228,9 @@ class Generic_WSI_Classification_Dataset(Dataset):
 		if from_id:
 			if len(self.train_ids) > 0:
 				train_data = self.slide_data.loc[self.train_ids].reset_index(drop=True)
-				train_split = Generic_Split(train_data, data_dir=self.data_dir, num_classes=self.num_classes)
-
+				train_split = Generic_Split(train_data, data_dir=self.data_dir, 
+								num_classes=self.num_classes, 
+								preload_cache=self.features_cache)
 			else:
 				train_split = None
 			
@@ -323,10 +324,38 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
 	def __init__(self,
 		data_dir, 
 		**kwargs):
-	
+
 		super(Generic_MIL_Dataset, self).__init__(**kwargs)
 		self.data_dir = data_dir
-		self.use_h5 = False
+		self.use_h5 = False # Never used
+		self.features_cache = {}
+
+	def set_shared_cache(self, shared_dict):
+		"""Injects a multiprocessing.Manager.dict() for shared RAM access."""
+		self.features_cache = shared_dict
+
+	def preload_data(self):
+		"""Iterates through all slides and loads them into RAM."""
+		print(f"Preloading {len(self.slide_data)} slides into RAM...")
+		for idx in range(len(self.slide_data)):
+			slide_id = self.slide_data['slide_id'][idx]
+			
+			# Use existing logic to find path
+			if type(self.data_dir) == dict:
+				source = self.slide_data['source'][idx]
+				data_dir = self.data_dir[source]
+			else:
+				data_dir = self.data_dir
+
+			full_path = os.path.join(data_dir, 'pt_files', '{}.pt'.format(slide_id))
+			
+			# Load and store in cache
+			if os.path.exists(full_path):
+				self.features_cache[slide_id] = torch.load(full_path)
+			
+			if idx % 500 == 0:
+				print(f"Loaded {idx}/{len(self.slide_data)} slides...")
+		print("Preloading complete.")
 
 	def load_from_h5(self, toggle):
 		self.use_h5 = toggle
@@ -334,13 +363,18 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
 	def __getitem__(self, idx):
 		slide_id = self.slide_data['slide_id'][idx]
 		label = self.slide_data['label'][idx]
+
+		# NEW: Priority 1 - Check RAM Cache
+		if slide_id in self.features_cache:
+			return self.features_cache[slide_id], label
+
 		if type(self.data_dir) == dict:
 			source = self.slide_data['source'][idx]
 			data_dir = self.data_dir[source]
 		else:
 			data_dir = self.data_dir
 
-		if not self.use_h5:
+		if not self.use_h5: # Always
 			if self.data_dir:
 				full_path = os.path.join(data_dir, 'pt_files', '{}.pt'.format(slide_id))
 				features = torch.load(full_path)
@@ -360,11 +394,14 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
 
 
 class Generic_Split(Generic_MIL_Dataset):
-	def __init__(self, slide_data, data_dir=None, num_classes=2):
+	def __init__(self, slide_data, data_dir=None, num_classes=2, preload_cache=None):
 		self.use_h5 = False
 		self.slide_data = slide_data
 		self.data_dir = data_dir
 		self.num_classes = num_classes
+		# Store the reference to the parent's cache
+		self.features_cache = preload_cache if preload_cache is not None else {}
+		
 		self.slide_cls_ids = [[] for i in range(self.num_classes)]
 		for i in range(self.num_classes):
 			self.slide_cls_ids[i] = np.where(self.slide_data['label'] == i)[0]
