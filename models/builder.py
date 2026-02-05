@@ -1,9 +1,10 @@
-from transformers import AutoModel, AutoImageProcessor
+from transformers import AutoModel, AutoImageProcessor, AutoProcessor
 import torch.nn as nn
 from utils.constants import MODEL2CONSTANTS
 from utils.transform_utils import get_eval_transforms
 
-from .retccl import RetCCLEncoder
+from retccl import RetCCLEncoder
+from medsiglip_encoder import MedGemmaPatchEncoder
 
 class HFEncoderWrapper(nn.Module):
 	"""Wraps any HF Vision model to return only the pooled visual features."""
@@ -63,16 +64,38 @@ def get_encoder(model_name, target_img_size=224):
 			std= constants['std'],
 			target_img_size=target_img_size)
 
+	#-----------------------------------------------------------
+	# 3. MedGemma-Native MedSigLIP
 	# -----------------------------------------------------------
-	# 3. Hugging Face AutoModel Fallback
+	if model_name == 'medsiglip':
+		model_id = "google/medgemma-1.5-4b-it"
+
+		model = MedGemmaPatchEncoder(model_id=model_id)
+
+		# We extract mean and std from the processor
+		processor = AutoProcessor.from_pretrained(model_id)
+		mean = processor.image_processor.image_mean
+		std = processor.image_processor.image_std
+
+		img_transforms = get_eval_transforms(
+			mean=mean, 
+			std=std, 
+			target_img_size=target_img_size
+		)
+		return model, img_transforms
+
+	# -----------------------------------------------------------
+	# 4. Hugging Face AutoModel Fallback
 	# -----------------------------------------------------------
 	print(f"Attempting to load {model_name} from Hugging Face...")
 	try:
 		processor = AutoImageProcessor.from_pretrained(model_name)
 		model = HFEncoderWrapper(model_name)
 
-		mean = getattr(processor, 'image_mean', [0.485, 0.456, 0.406])
-		std = getattr(processor, 'image_std', [0.229, 0.224, 0.225])
+		# We extract mean and std from the processor
+		processor = AutoProcessor.from_pretrained(model_id)
+		mean = processor.image_processor.image_mean
+		std = processor.image_processor.image_std
 
 		img_transforms = get_eval_transforms(
 			mean=mean,
