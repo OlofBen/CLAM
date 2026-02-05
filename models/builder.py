@@ -3,8 +3,8 @@ import torch.nn as nn
 from utils.constants import MODEL2CONSTANTS
 from utils.transform_utils import get_eval_transforms
 
-from retccl import RetCCLEncoder
-from medsiglip_encoder import MedGemmaPatchEncoder
+from models.retccl import RetCCLEncoder
+from models.medsiglip_encoder import MedGemmaPatchEncoder
 
 class HFEncoderWrapper(nn.Module):
 	"""Wraps any HF Vision model to return only the pooled visual features."""
