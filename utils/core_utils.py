@@ -1,4 +1,5 @@
 import numpy as np
+import random
 import torch
 from utils.utils import *
 import os
@@ -9,7 +10,25 @@ from sklearn.preprocessing import label_binarize
 from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.metrics import auc as calc_auc
 
+from torchvision.ops import sigmoid_focal_loss
+import torch.nn.functional as F
+
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+class FocalLossWrapper(nn.Module):
+    def __init__(self, alpha=0.25, gamma=2.0, n_classes=2):
+        super(FocalLossWrapper, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.n_classes = n_classes
+
+    def forward(self, logits, targets):
+        # 1. Convert targets to one-hot encoding
+        # logits shape: [Batch, N_Classes], targets shape: [Batch]
+        targets_one_hot = F.one_hot(targets, num_classes=self.n_classes).float()
+        
+        # 2. Call torchvision focal loss
+        return sigmoid_focal_loss(logits, targets_one_hot, alpha=self.alpha, gamma=self.gamma, reduction='mean')
 
 class Accuracy_Logger(object):
     """Accuracy logger"""
@@ -120,7 +139,8 @@ def train(datasets, cur, args):
         if device.type == 'cuda':
             loss_fn = loss_fn.cuda()
     else:
-        loss_fn = nn.CrossEntropyLoss()
+        loss_fn = FocalLossWrapper(alpha=0.25, gamma=2.0, n_classes=args.n_classes)
+        #loss_fn = nn.CrossEntropyLoss()
     print('Done!')
     
     print('\nInit Model...', end=' ')
@@ -183,7 +203,7 @@ def train(datasets, cur, args):
 
     for epoch in range(args.max_epochs):
         if args.model_type in ['clam_sb', 'clam_mb'] and not args.no_inst_cluster:     
-            train_loop_clam(epoch, model, train_loader, optimizer, args.n_classes, args.bag_weight, writer, loss_fn)
+            train_loop_clam(epoch, model, train_loader, optimizer, args.n_classes, args.bag_weight, args.accumilation_steps, writer, loss_fn)
             stop = validate_clam(cur, epoch, model, val_loader, args.n_classes, 
                 early_stopping, writer, loss_fn, args.results_dir)
         
@@ -222,7 +242,7 @@ def train(datasets, cur, args):
     return results_dict, test_auc, val_auc, 1-test_error, 1-val_error 
 
 
-def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, writer = None, loss_fn = None):
+def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, accumilation_steps = 1, writer = None, loss_fn = None):
     model.train()
     acc_logger = Accuracy_Logger(n_classes=n_classes)
     inst_logger = Accuracy_Logger(n_classes=n_classes)
@@ -234,6 +254,9 @@ def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, writ
 
     print('\n')
     for batch_idx, (data, label) in enumerate(loader):
+        # if label == 0 and random.uniform(0, 1) < 0.9:
+        #     continue
+        data = data.float()
         data, label = data.to(device), label.to(device)
         logits, Y_prob, Y_hat, _, instance_dict = model(data, label=label, instance_eval=True)
 
@@ -261,10 +284,12 @@ def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, writ
         train_error += error
         
         # backward pass
-        total_loss.backward()
-        # step
-        optimizer.step()
-        optimizer.zero_grad()
+        loss_scaled = total_loss / accumilation_steps
+
+        loss_scaled.backward()
+        if (batch_idx + 1) % accumilation_steps == 0 or (batch_idx + 1) == len(loader):
+            optimizer.step()
+            optimizer.zero_grad()
 
     # calculate loss and error for epoch
     train_loss /= len(loader)
@@ -297,6 +322,7 @@ def train_loop(epoch, model, loader, optimizer, n_classes, writer = None, loss_f
 
     print('\n')
     for batch_idx, (data, label) in enumerate(loader):
+        data = data.float()
         data, label = data.to(device), label.to(device)
 
         logits, Y_prob, Y_hat, _, _ = model(data)
@@ -346,6 +372,7 @@ def validate(cur, epoch, model, loader, n_classes, early_stopping = None, writer
 
     with torch.no_grad():
         for batch_idx, (data, label) in enumerate(loader):
+            data = data.float()
             data, label = data.to(device, non_blocking=True), label.to(device, non_blocking=True)
 
             logits, Y_prob, Y_hat, _, _ = model(data)
@@ -408,6 +435,7 @@ def validate_clam(cur, epoch, model, loader, n_classes, early_stopping = None, w
     sample_size = model.k_sample
     with torch.inference_mode():
         for batch_idx, (data, label) in enumerate(loader):
+            data = data.float()
             data, label = data.to(device), label.to(device)      
             logits, Y_prob, Y_hat, _, instance_dict = model(data, label=label, instance_eval=True)
             acc_logger.log(Y_hat, label)
@@ -495,6 +523,7 @@ def summary(model, loader, n_classes):
     patient_results = {}
 
     for batch_idx, (data, label) in enumerate(loader):
+        data = data.float()
         data, label = data.to(device), label.to(device)
         slide_id = slide_ids.iloc[batch_idx]
         with torch.inference_mode():

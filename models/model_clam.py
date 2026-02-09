@@ -105,15 +105,17 @@ class CLAM_SB(nn.Module):
     
     #instance-level evaluation for in-the-class attention branch
     def inst_eval(self, A, h, classifier): 
+        bag_k = min(self.k_sample, len(A) // 2)
+
         device=h.device
         if len(A.shape) == 1:
             A = A.view(1, -1)
-        top_p_ids = torch.topk(A, self.k_sample)[1][-1]
+        top_p_ids = torch.topk(A, bag_k)[1][-1]
         top_p = torch.index_select(h, dim=0, index=top_p_ids)
-        top_n_ids = torch.topk(-A, self.k_sample, dim=1)[1][-1]
+        top_n_ids = torch.topk(-A, bag_k, dim=1)[1][-1]
         top_n = torch.index_select(h, dim=0, index=top_n_ids)
-        p_targets = self.create_positive_targets(self.k_sample, device)
-        n_targets = self.create_negative_targets(self.k_sample, device)
+        p_targets = self.create_positive_targets(bag_k, device)
+        n_targets = self.create_negative_targets(bag_k, device)
 
         all_targets = torch.cat([p_targets, n_targets], dim=0)
         all_instances = torch.cat([top_p, top_n], dim=0)

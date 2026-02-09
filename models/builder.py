@@ -93,7 +93,7 @@ def get_encoder(model_name, target_img_size=224):
 		model = HFEncoderWrapper(model_name)
 
 		# We extract mean and std from the processor
-		processor = AutoProcessor.from_pretrained(model_id)
+		processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
 		mean = processor.image_processor.image_mean
 		std = processor.image_processor.image_std
 

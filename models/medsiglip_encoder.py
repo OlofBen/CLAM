@@ -5,8 +5,6 @@ from transformers import AutoModelForImageTextToText
 class MedGemmaPatchEncoder(nn.Module):
     """
     Wraps the MedGemma vision tower and projector for patch-level encoding.
-    This ensures that patch features are already in the 'LLM-ready' latent space
-    before CLAM aggregation.
     """
     def __init__(self, model_id="google/medgemma-1.5-4b-it", device="cuda"):
         super().__init__()
@@ -15,8 +13,8 @@ class MedGemmaPatchEncoder(nn.Module):
         # Load the full model to extract internal modules
         # We use bfloat16 to match MedGemma's native precision
         full_model = AutoModelForImageTextToText.from_pretrained(
-            model_id, 
-            torch_dtype=torch.bfloat16, 
+            model_id,
+            dtype=torch.bfloat16,
             device_map=device
         )
 

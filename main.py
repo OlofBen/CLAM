@@ -42,7 +42,7 @@ def main(args):
     folds = np.arange(start, end)
     for i in folds:
         seed_torch(args.seed)
-        train_dataset, val_dataset, test_dataset = dataset.return_splits(from_id=False, 
+        train_dataset, val_dataset, test_dataset = dataset.return_splits(args, from_id=False, 
                 csv_path='{}/splits_{}.csv'.format(args.split_dir, i))
         
         datasets = (train_dataset, val_dataset, test_dataset)
@@ -110,6 +110,8 @@ parser.add_argument('--subtyping', action='store_true', default=False,
 parser.add_argument('--bag_weight', type=float, default=0.7,
                     help='clam: weight coefficient for bag-level loss (default: 0.7)')
 parser.add_argument('--B', type=int, default=8, help='numbr of positive/negative patches to sample for clam')
+parser.add_argument('--bag_dropout', type=float, default=0.2, help='dropout over each bag of patches')
+parser.add_argument('--accumilation_steps', type=int, default=1, help='backward iterations before optimizer step')
 args = parser.parse_args()
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -160,8 +162,9 @@ dataset = Generic_MIL_Dataset(csv_path = os.path.join('dataset_csv', '%s.csv' % 
                               shuffle = False, 
                               seed = args.seed, 
                               print_info = True,
-                              patient_strat=False)
-    
+                              patient_strat=False,
+                              bag_dropout=args.bag_dropout)
+
 if not os.path.isdir(args.results_dir):
     os.mkdir(args.results_dir)
 
