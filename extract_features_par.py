@@ -17,31 +17,23 @@ from models import get_encoder
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-def compute_w_loader(output_path, loader, dataset_iter, model, verbose = 0):
+def compute_w_loader(loader, dataset_iter, model, verbose = 0):
 	"""
 	args:
 		output_path: directory to save computed features (.h5 file)
 		model: pytorch model
 		verbose: level of feedback
 	"""
-	if verbose > 0:
-		print('processing {}: total of {} batches'.format(output_path,len(loader)))
 
-	mode = 'w'
-	for count, data in enumerate(tqdm(dataset_iter, total=len(loader))):
-		with torch.inference_mode():	
-			batch = data['img']
-			coords = data['coord'].numpy().astype(np.int32)
-			batch = batch.to(device, non_blocking=True)
-
+	all_features = []
+	for data in tqdm(dataset_iter, total=len(loader)):
+		with torch.inference_mode():
+			batch = data['img'].to(device, non_blocking=True)
 			features = model(batch)
-			features = features.cpu().numpy()
 
-			asset_dict = {'features': features, 'coords': coords}
-			save_hdf5(output_path, asset_dict, attr_dict= None, mode=mode)
-			mode = 'a'
+			all_features.append(features.float().cpu())
 
-	return output_path
+	return torch.cat(all_features, dim=0)
 
 def fetch_dataset(bags_dataset, bag_candidate_idx, args, loader_kwargs, dest_files, img_transforms):
 	slide_id = bags_dataset[bag_candidate_idx].split(args.slide_ext)[0]
@@ -96,12 +88,12 @@ if __name__ == '__main__':
 
 	model.eval()
 
-	loader_kwargs = {'num_workers': 4,
+	loader_kwargs = {'num_workers': 8,
 					'prefetch_factor': 4, 
 					'pin_memory': True,
-					'persistent_workers': True,
+					'persistent_workers': False,
 					} if device.type == "cuda" else {}
-	num_prefetch = 3
+	num_prefetch = 2
 
 	total = len(bags_dataset)
 
@@ -128,18 +120,11 @@ if __name__ == '__main__':
 			if loader is None: 
 				continue
 
-			output_path = os.path.join(args.feat_dir, 'h5_files', bag_name)
 			time_start = time.time()
-			output_file_path = compute_w_loader(output_path, loader = loader, dataset_iter = dataset_iter, model = model, verbose = 1)
+			features = compute_w_loader(loader, dataset_iter, model, verbose=1)
 
 			time_elapsed = time.time() - time_start
-			print('\ncomputing features for {} took {} s'.format(output_file_path, time_elapsed))
-			with h5py.File(output_file_path, "r") as file:
-				features = file['features'][:]
-				print('features size: ', features.shape)
-				print('coordinates size: ', file['coords'].shape)
 
-			features = torch.from_numpy(features)
 			bag_base, _ = os.path.splitext(bag_name)
 			torch.save(features, os.path.join(args.feat_dir, 'pt_files', bag_base+'.pt'))
 
