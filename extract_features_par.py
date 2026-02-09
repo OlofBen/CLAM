@@ -6,7 +6,6 @@ from concurrent.futures import ThreadPoolExecutor
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-import h5py
 
 from tqdm import tqdm
 import numpy as np
@@ -17,7 +16,7 @@ from models import get_encoder
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-def compute_w_loader(loader, dataset_iter, model, verbose = 0):
+def compute_w_loader(loader, dataset_iter, model):
 	"""
 	args:
 		output_path: directory to save computed features (.h5 file)
@@ -116,7 +115,7 @@ if __name__ == '__main__':
 		try:
 			current_future = futures_queue.pop(0)
 			loader, dataset_iter, bag_name = current_future.result()
-
+			print(f"\nProcessing file {bag_name}")
 			if loader is None: 
 				continue
 
@@ -126,6 +125,7 @@ if __name__ == '__main__':
 			time_elapsed = time.time() - time_start
 
 			bag_base, _ = os.path.splitext(bag_name)
+			print('features size: ', features.shape)
 			torch.save(features, os.path.join(args.feat_dir, 'pt_files', bag_base+'.pt'))
 
 			del loader
