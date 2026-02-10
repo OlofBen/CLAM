@@ -254,8 +254,6 @@ def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, accu
 
     print('\n')
     for batch_idx, (data, label) in enumerate(loader):
-        # if label == 0 and random.uniform(0, 1) < 0.9:
-        #     continue
         data = data.float()
         data, label = data.to(device), label.to(device)
         logits, Y_prob, Y_hat, _, instance_dict = model(data, label=label, instance_eval=True)
