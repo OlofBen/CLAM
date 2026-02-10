@@ -30,11 +30,11 @@ def drawHeatmap(scores, coords, slide_path=None, wsi_object=None, vis_level = -1
     if wsi_object is None:
         wsi_object = WholeSlideImage(slide_path)
         print(wsi_object.name)
-    
+
     wsi = wsi_object.getOpenSlide()
     if vis_level < 0:
         vis_level = wsi.get_best_level_for_downsample(32)
-    
+
     heatmap = wsi_object.visHeatmap(scores=scores, coords=coords, vis_level=vis_level, **kwargs)
     return heatmap
 
@@ -48,12 +48,12 @@ def initialize_wsi(wsi_path, seg_mask_path=None, seg_params=None, filter_params=
     wsi_object.saveSegmentation(seg_mask_path)
     return wsi_object
 
-def compute_from_patches(wsi_object, img_transforms, feature_extractor=None, clam_pred=None, model=None, batch_size=512,  
-    attn_save_path=None, ref_scores=None, feat_save_path=None, **wsi_kwargs):    
+def compute_from_patches(wsi_object, img_transforms, feature_extractor=None, clam_pred=None, model=None, batch_size=512,
+    attn_save_path=None, ref_scores=None, feat_save_path=None, **wsi_kwargs):
     top_left = wsi_kwargs['top_left']
     bot_right = wsi_kwargs['bot_right']
-    patch_size = wsi_kwargs['patch_size'] 
-    
+    patch_size = wsi_kwargs['patch_size']
+
     roi_dataset = Wsi_Region(wsi_object, t=img_transforms, **wsi_kwargs)
     roi_loader = get_simple_loader(roi_dataset, batch_size=batch_size, num_workers=8)
     print('total number of patches to process: ', len(roi_dataset))
@@ -63,13 +63,13 @@ def compute_from_patches(wsi_object, img_transforms, feature_extractor=None, cla
     for idx, (roi, coords) in enumerate(tqdm(roi_loader)):
         roi = roi.to(device)
         coords = coords.numpy()
-        
+
         with torch.inference_mode():
             features = feature_extractor(roi)
 
             if attn_save_path is not None:
                 A = model(features, attention_only=True)
-           
+
                 if A.size(0) > 1: #CLAM multi-branch attention
                     A = A[clam_pred]
 
@@ -81,7 +81,7 @@ def compute_from_patches(wsi_object, img_transforms, feature_extractor=None, cla
 
                 asset_dict = {'attention_scores': A, 'coords': coords}
                 save_path = save_hdf5(attn_save_path, asset_dict, mode=mode)
-    
+
         if feat_save_path is not None:
             asset_dict = {'features': features.cpu().numpy(), 'coords': coords}
             save_hdf5(feat_save_path, asset_dict, mode=mode)

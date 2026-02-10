@@ -17,7 +17,7 @@ class RetCCLEncoder(nn.Module):
     def __init__(self, weights_path=None):
         super().__init__()
         # 1. Initialize standard ResNet50
-        self.model = models.resnet50(weights=None) 
+        self.model = models.resnet50(weights=None)
         self.model.fc = nn.Identity() # Replace classification head with Identity
 
         # 2. Load RetCCL Weights
@@ -28,7 +28,7 @@ class RetCCLEncoder(nn.Module):
             raise FileNotFoundError(f"RetCCL weights not found at: {weights_path}")
 
         print(f"Loading RetCCL weights from {weights_path}...")
-        
+
         try:
             # SECURE LOAD: explicitly disallow arbitrary code execution
             state_dict = torch.load(weights_path, map_location="cpu", weights_only=True)
@@ -39,7 +39,7 @@ class RetCCLEncoder(nn.Module):
         # 3. Clean state_dict keys (handle DataParallel 'module.' prefix)
         new_state_dict = {}
         for k, v in state_dict.items():
-            name = k.replace("module.", "") 
+            name = k.replace("module.", "")
             new_state_dict[name] = v
 
         # 4. Load weights

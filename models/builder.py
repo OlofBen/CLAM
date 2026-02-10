@@ -12,9 +12,9 @@ class TimmEncoderWrapper(nn.Module):
         super(TimmEncoderWrapper, self).__init__()
         # Use hf_hub prefix to pull directly from MahmoodLab/UNI
         self.model = timm.create_model(
-            f"hf_hub:{model_name}", 
-            pretrained=True, 
-            init_values=1e-5, 
+            f"hf_hub:{model_name}",
+            pretrained=True,
+            init_values=1e-5,
             num_classes=0,       # Removes the head so we get features
             dynamic_img_size=True # Allows for different patch sizes/resolutions
         )
@@ -60,14 +60,14 @@ def get_encoder(model_name, target_img_size=224, trust_remote_code = False):
     # -----------------------------------------------------------
     if model_name == 'retccl':
         model = RetCCLEncoder()
-        
+
         # RetCCL uses standard ImageNet normalization
         mean = [0.485, 0.456, 0.406]
         std  = [0.229, 0.224, 0.225]
-        
+
         img_transforms = get_eval_transforms(
-            mean=mean, 
-            std=std, 
+            mean=mean,
+            std=std,
             target_img_size=target_img_size
         )
         return model, img_transforms
@@ -98,8 +98,8 @@ def get_encoder(model_name, target_img_size=224, trust_remote_code = False):
         std = processor.image_processor.image_std
 
         img_transforms = get_eval_transforms(
-            mean=mean, 
-            std=std, 
+            mean=mean,
+            std=std,
             target_img_size=target_img_size
         )
         return model, img_transforms
@@ -116,8 +116,8 @@ def get_encoder(model_name, target_img_size=224, trust_remote_code = False):
         std = (0.229, 0.224, 0.225)
 
         img_transforms = get_eval_transforms(
-            mean=mean, 
-            std=std, 
+            mean=mean,
+            std=std,
             target_img_size=target_img_size
         )
 

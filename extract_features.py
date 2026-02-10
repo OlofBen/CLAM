@@ -72,13 +72,13 @@ if __name__ == '__main__':
     print('initializing dataset')
     csv_path = args.csv_path
     bags_dataset = Dataset_All_Bags(csv_path)
-    
+
     os.makedirs(args.feat_dir, exist_ok=True)
     os.makedirs(os.path.join(args.feat_dir, 'pt_files'), exist_ok=True)
     os.makedirs(os.path.join(args.feat_dir, 'h5_files'), exist_ok=True)
     dest_files = os.listdir(os.path.join(args.feat_dir, 'pt_files'))
 
-    model, img_transforms = get_encoder(args.model_name, target_img_size=args.target_patch_size, trust_remote_code=args.trust_remote_code)        
+    model, img_transforms = get_encoder(args.model_name, target_img_size=args.target_patch_size, trust_remote_code=args.trust_remote_code)
     model = model.to(device)
 
     if torch.cuda.device_count() > 1:
@@ -88,7 +88,7 @@ if __name__ == '__main__':
     model.eval()
 
     loader_kwargs = {'num_workers': 8,
-                    'prefetch_factor': 4, 
+                    'prefetch_factor': 4,
                     'pin_memory': True,
                     'persistent_workers': False,
                     } if device.type == "cuda" else {}
@@ -116,7 +116,7 @@ if __name__ == '__main__':
             current_future = futures_queue.pop(0)
             loader, dataset_iter, bag_name = current_future.result()
             print(f"\nProcessing file {bag_name}")
-            if loader is None: 
+            if loader is None:
                 continue
 
             time_start = time.time()

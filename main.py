@@ -44,15 +44,15 @@ def main(args):
     folds = np.arange(start, end)
     for i in folds:
         seed_torch(args.seed)
-        train_dataset, val_dataset, test_dataset = dataset.return_splits(args, from_id=False, 
+        train_dataset, val_dataset, test_dataset = dataset.return_splits(args, from_id=False,
                 csv_path='{}/splits_{}.csv'.format(args.split_dir, i))
-        
+
         datasets = (train_dataset, val_dataset, test_dataset)
-        
+
         # 2. Unpack the new metrics from your train function
         # Note: Ensure your train() function is updated to return these!
         results, test_auc, val_auc, test_acc, val_acc, test_f1, val_f1, test_prec, val_prec, test_recall, val_recall = train(datasets, i, args)
-        
+
         all_test_auc.append(test_auc)
         all_val_auc.append(val_auc)
         all_test_acc.append(test_acc)
@@ -70,8 +70,8 @@ def main(args):
 
     # 3. Add to the Summary DataFrame
     final_df = pd.DataFrame({
-        'folds': folds, 
-        'test_auc': all_test_auc, 'val_auc': all_val_auc, 
+        'folds': folds,
+        'test_auc': all_test_auc, 'val_auc': all_val_auc,
         'test_acc': all_test_acc, 'val_acc' : all_val_acc,
         'test_f1': all_test_f1, 'val_f1': all_val_f1,
         'test_precision': all_test_precision, 'val_precision': all_val_precision,
@@ -85,7 +85,7 @@ def main(args):
 
 # Generic training settings
 parser = argparse.ArgumentParser(description='Configurations for WSI Training')
-parser.add_argument('--data_root_dir', type=str, default=None, 
+parser.add_argument('--data_root_dir', type=str, default=None,
                     help='data directory')
 parser.add_argument('--embed_dim', type=int, default=1024)
 parser.add_argument('--max_epochs', type=int, default=200,
@@ -96,14 +96,14 @@ parser.add_argument('--label_frac', type=float, default=1.0,
                     help='fraction of training labels (default: 1.0)')
 parser.add_argument('--reg', type=float, default=1e-5,
                     help='weight decay (default: 1e-5)')
-parser.add_argument('--seed', type=int, default=1, 
+parser.add_argument('--seed', type=int, default=1,
                     help='random seed for reproducible experiment (default: 1)')
 parser.add_argument('--k', type=int, default=10, help='number of folds (default: 10)')
 parser.add_argument('--k_start', type=int, default=-1, help='start fold (default: -1, last fold)')
 parser.add_argument('--k_end', type=int, default=-1, help='end fold (default: -1, first fold)')
 parser.add_argument('--results_dir', default='./results', help='results directory (default: ./results)')
-parser.add_argument('--split_dir', type=str, default=None, 
-                    help='manually specify the set of splits to use, ' 
+parser.add_argument('--split_dir', type=str, default=None,
+                    help='manually specify the set of splits to use, '
                     +'instead of infering from the task and label_frac argument (default: None)')
 parser.add_argument('--log_data', action='store_true', default=False, help='log data using tensorboard')
 parser.add_argument('--testing', action='store_true', default=False, help='debugging tool')
@@ -112,7 +112,7 @@ parser.add_argument('--opt', type=str, choices = ['adam', 'sgd'], default='adam'
 parser.add_argument('--drop_out', type=float, default=0.25, help='dropout')
 parser.add_argument('--bag_loss', type=str, choices=['svm', 'ce'], default='ce',
                      help='slide-level classification loss function (default: ce)')
-parser.add_argument('--model_type', type=str, choices=['clam_sb', 'clam_mb', 'mil'], default='clam_sb', 
+parser.add_argument('--model_type', type=str, choices=['clam_sb', 'clam_mb', 'mil'], default='clam_sb',
                     help='type of model (default: clam_sb, clam w/ single attention branch)')
 parser.add_argument('--exp_code', type=str, help='experiment code for saving results')
 parser.add_argument('--weighted_sample', action='store_true', default=False, help='enable weighted sampling')
@@ -124,7 +124,7 @@ parser.add_argument('--no_inst_cluster', action='store_true', default=False,
                      help='disable instance-level clustering')
 parser.add_argument('--inst_loss', type=str, choices=['svm', 'ce', None], default=None,
                      help='instance-level clustering loss function (default: None)')
-parser.add_argument('--subtyping', action='store_true', default=False, 
+parser.add_argument('--subtyping', action='store_true', default=False,
                      help='subtyping problem')
 parser.add_argument('--bag_weight', type=float, default=0.7,
                     help='clam: weight coefficient for bag-level loss (default: 0.7)')
@@ -149,12 +149,12 @@ def seed_torch(seed=7):
 seed_torch(args.seed)
 
 encoding_size = args.embed_dim
-settings = {'num_splits': args.k, 
+settings = {'num_splits': args.k,
             'k_start': args.k_start,
             'k_end': args.k_end,
             'task': args.task,
-            'max_epochs': args.max_epochs, 
-            'results_dir': args.results_dir, 
+            'max_epochs': args.max_epochs,
+            'results_dir': args.results_dir,
             'lr': args.lr,
             'experiment': args.exp_code,
             'reg': args.reg,
@@ -165,7 +165,7 @@ settings = {'num_splits': args.k,
             'model_size': args.model_size,
             "use_drop_out": args.drop_out,
             'weighted_sample': args.weighted_sample,
-            'opt': args.opt, 
+            'opt': args.opt,
             'n_classes': args.n_classes}
 
 if args.model_type in ['clam_sb', 'clam_mb']:
@@ -178,8 +178,8 @@ print('\nLoad Dataset')
 
 dataset = Generic_MIL_Dataset(csv_path = os.path.join('dataset_csv', '%s.csv' % args.task),
                               data_dir= args.data_root_dir,
-                              shuffle = False, 
-                              seed = args.seed, 
+                              shuffle = False,
+                              seed = args.seed,
                               print_info = True,
                               patient_strat=False,
                               bag_dropout=args.bag_dropout)
@@ -208,7 +208,7 @@ f.close()
 
 print("################# Settings ###################")
 for key, val in settings.items():
-    print("{}:  {}".format(key, val))        
+    print("{}:  {}".format(key, val))
 
 if __name__ == "__main__":
     results = main(args)

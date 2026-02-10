@@ -19,7 +19,7 @@ def stitching(file_path, downscale = 64):
     start = time.time()
     heatmap = StitchPatches(file_path, downscale=downscale, bg_color=(0,0,0), alpha=-1, draw_grid=False)
     total_time = time.time() - start
-    
+
     return heatmap, total_time
 
 def segment(WSI_object, seg_params, filter_params):
@@ -31,7 +31,7 @@ def segment(WSI_object, seg_params, filter_params):
 
 
     ### Stop Seg Timers
-    seg_time_elapsed = time.time() - start_time   
+    seg_time_elapsed = time.time() - start_time
     return WSI_object, seg_time_elapsed
 
 def patching(WSI_object, **kwargs):
@@ -47,14 +47,14 @@ def patching(WSI_object, **kwargs):
     return file_path, patch_time_elapsed
 
 
-def process_single_slide(idx, df, source, patch_save_dir, mask_save_dir, stitch_save_dir, 
-                         seg_params, filter_params, vis_params, patch_params, 
-                         patch_size, step_size, custom_downsample, patch_level, 
+def process_single_slide(idx, df, source, patch_save_dir, mask_save_dir, stitch_save_dir,
+                         seg_params, filter_params, vis_params, patch_params,
+                         patch_size, step_size, custom_downsample, patch_level,
                          use_default_params, seg, save_mask, stitch, patch, auto_skip):
 
     slide = df.loc[idx, 'slide_id']
     slide_id, _ = os.path.splitext(slide)
-    
+
     # Status tracking (returned to main process)
     result_status = {'idx': idx, 'status': 'processed', 'seg_t': -1, 'patch_t': -1, 'stitch_t': -1}
 
@@ -131,7 +131,7 @@ def process_single_slide(idx, df, source, patch_save_dir, mask_save_dir, stitch_
         else:
             current_seg_params['exclude_ids'] = []
 
-        w, h = WSI_object.level_dim[current_seg_params['seg_level']] 
+        w, h = WSI_object.level_dim[current_seg_params['seg_level']]
         if w * h > 1e9:
             print('level_dim {} x {} is likely too large for successful segmentation, aborting'.format(w, h))
             df.loc[idx, 'status'] = 'failed_seg'
@@ -143,7 +143,7 @@ def process_single_slide(idx, df, source, patch_save_dir, mask_save_dir, stitch_
 
         seg_time_elapsed = -1
         if seg:
-            WSI_object, seg_time_elapsed = segment(WSI_object, current_seg_params, current_filter_params) 
+            WSI_object, seg_time_elapsed = segment(WSI_object, current_seg_params, current_filter_params)
 
         if save_mask:
             mask = WSI_object.visWSI(**current_vis_params)
@@ -152,10 +152,10 @@ def process_single_slide(idx, df, source, patch_save_dir, mask_save_dir, stitch_
 
         patch_time_elapsed = -1 # Default time
         if patch:
-            current_patch_params.update({'patch_level': patch_level, 'patch_size': patch_size, 'step_size': step_size, 
+            current_patch_params.update({'patch_level': patch_level, 'patch_size': patch_size, 'step_size': step_size,
                                          'save_path': patch_save_dir, 'custom_downsample': custom_downsample})
             file_path, patch_time_elapsed = patching(WSI_object = WSI_object, **current_patch_params)
-        
+
         stitch_time_elapsed = -1
         if stitch:
             file_path = os.path.join(patch_save_dir, slide_id+'.h5')
@@ -173,24 +173,24 @@ def process_single_slide(idx, df, source, patch_save_dir, mask_save_dir, stitch_
         result_status['seg_t'] = seg_time_elapsed
         result_status['patch_t'] = patch_time_elapsed
         result_status['stitch_t'] = stitch_time_elapsed
-        
+
     except Exception as e:
         print(f"Failed to process {slide}: {e}")
         result_status['status'] = 'failed'
-        
+
     return result_status
 
-def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_dir, 
-                  patch_size = 256, step_size = 256, custom_downsample=1, 
+def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_dir,
+                  patch_size = 256, step_size = 256, custom_downsample=1,
                   seg_params = {'seg_level': -1, 'sthresh': 130, 'mthresh': 5, 'close': 4, 'use_otsu': False,
                   'keep_ids': 'none', 'exclude_ids': 'none'},
-                  filter_params = {'a_t':25, 'a_h': 16, 'max_n_holes':8 }, 
+                  filter_params = {'a_t':25, 'a_h': 16, 'max_n_holes':8 },
                   vis_params = {'vis_level': -1, 'line_thickness': 250},
                   patch_params = {'white_thresh': 5, 'black_thresh': 40, 'use_padding': True, 'contour_fn': 'four_pt'},
                   patch_level = 0,
-                  use_default_params = False, 
-                  seg = False, save_mask = True, 
-                  stitch= False, 
+                  use_default_params = False,
+                  seg = False, save_mask = True,
+                  stitch= False,
                   patch = False, auto_skip=True, process_list = None, num_workers=96):
 
     slides = sorted(os.listdir(source))
@@ -212,21 +212,21 @@ def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_d
 
     mask = df['process'] == 1
     process_indices = df[mask].index.tolist()
-    
+
     # Create a partial function with all arguments fixed except the index
-    worker_func = partial(process_single_slide, 
+    worker_func = partial(process_single_slide,
                           df=df, source=source, patch_save_dir=patch_save_dir,
                           mask_save_dir=mask_save_dir, stitch_save_dir=stitch_save_dir,
                           seg_params=seg_params, filter_params=filter_params,
                           vis_params=vis_params, patch_params=patch_params,
-                          patch_size=patch_size, step_size=step_size, 
+                          patch_size=patch_size, step_size=step_size,
                           custom_downsample=custom_downsample, patch_level=patch_level,
-                          use_default_params=use_default_params, seg=seg, 
-                          save_mask=save_mask, stitch=stitch, patch=patch, 
+                          use_default_params=use_default_params, seg=seg,
+                          save_mask=save_mask, stitch=stitch, patch=patch,
                           auto_skip=auto_skip)
 
     print(f"Starting parallel processing with {num_workers} workers...")
-    
+
     results = []
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         results = list(executor.map(worker_func, process_indices))
@@ -277,11 +277,11 @@ parser.add_argument('--save_dir', type = str,
                     help='directory to save processed data')
 parser.add_argument('--preset', default=None, type=str,
                     help='predefined profile of default segmentation and filter parameters (.csv)')
-parser.add_argument('--patch_level', type=int, default=0, 
+parser.add_argument('--patch_level', type=int, default=0,
                     help='downsample level at which to patch')
-parser.add_argument('--seg_level', type=int, default=-1, 
+parser.add_argument('--seg_level', type=int, default=-1,
                     help='downsample level at which to segment tissue') # NEW ARGUMENT
-parser.add_argument('--custom_downsample', type= int, choices=[1,2], default=1, 
+parser.add_argument('--custom_downsample', type= int, choices=[1,2], default=1,
                     help='custom downscale when native downsample is not available (only tested w/ 2x downscale)')
 parser.add_argument('--process_list',  type = str, default=None,
                     help='name of list of images to process with parameters (.csv)')
@@ -302,12 +302,12 @@ if __name__ == '__main__':
     print('patch_save_dir: ', patch_save_dir)
     print('mask_save_dir: ', mask_save_dir)
     print('stitch_save_dir: ', stitch_save_dir)
-    
-    directories = {'source': args.source, 
+
+    directories = {'source': args.source,
                    'save_dir': args.save_dir,
-                   'patch_save_dir': patch_save_dir, 
-                   'mask_save_dir' : mask_save_dir, 
-                   'stitch_save_dir': stitch_save_dir} 
+                   'patch_save_dir': patch_save_dir,
+                   'mask_save_dir' : mask_save_dir,
+                   'stitch_save_dir': stitch_save_dir}
 
     for key, val in directories.items():
         print("{} : {}".format(key, val))
@@ -333,7 +333,7 @@ if __name__ == '__main__':
 
         for key in patch_params.keys():
             patch_params[key] = preset_df.loc[0, key]
-    
+
     parameters = {'seg_params': seg_params,
                   'filter_params': filter_params,
                   'patch_params': patch_params,
@@ -342,8 +342,8 @@ if __name__ == '__main__':
     print(parameters)
 
     seg_times, patch_times = seg_and_patch(**directories, **parameters,
-                                            patch_size = args.patch_size, step_size=args.step_size, 
-                                            seg = args.seg,  use_default_params=False, save_mask = True, 
-                                            stitch= args.stitch, custom_downsample = args.custom_downsample, 
+                                            patch_size = args.patch_size, step_size=args.step_size,
+                                            seg = args.seg,  use_default_params=False, save_mask = True,
+                                            stitch= args.stitch, custom_downsample = args.custom_downsample,
                                             patch_level=args.patch_level, patch = args.patch,
                                             process_list = process_list, auto_skip=args.auto_skip)

@@ -17,12 +17,12 @@ class MIL_fc(nn.Module):
     def forward(self, h, return_features=False):
         h = self.fc(h)
         logits  = self.classifier(h) # K x 2
-        
+
         y_probs = F.softmax(logits, dim = 1)
         top_instance_idx = torch.topk(y_probs[:, 1], self.top_k, dim=0)[1].view(1,)
         top_instance = torch.index_select(logits, dim=0, index=top_instance_idx)
         Y_hat = torch.topk(top_instance, 1, dim = 1)[1]
-        Y_prob = F.softmax(top_instance, dim = 1) 
+        Y_prob = F.softmax(top_instance, dim = 1)
         results_dict = {}
 
         if return_features:
@@ -43,8 +43,8 @@ class MIL_fc_mc(nn.Module):
         self.top_k=top_k
         self.n_classes = n_classes
         assert self.top_k == 1
-    
-    def forward(self, h, return_features=False):       
+
+    def forward(self, h, return_features=False):
         h = self.fc(h)
         logits = self.classifiers(h)
 
@@ -55,7 +55,7 @@ class MIL_fc_mc(nn.Module):
 
         Y_hat = top_indices[1]
         Y_prob = y_probs[top_indices[0]]
-        
+
         results_dict = {}
 
         if return_features:
@@ -64,4 +64,4 @@ class MIL_fc_mc(nn.Module):
         return top_instance, Y_prob, Y_hat, y_probs, results_dict
 
 
-        
+
