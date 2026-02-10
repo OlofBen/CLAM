@@ -39,7 +39,6 @@ def fetch_dataset(bags_dataset, bag_candidate_idx, args, loader_kwargs, dest_fil
 	bag_name = slide_id + '.h5'
 	bag_candidate = os.path.join(args.data_dir, 'patches', bag_name)
 
-	print(bag_name)
 	if not os.path.exists(bag_candidate):
 		print(f'Warning: {bag_name} not found at {bag_candidate}')
 		return None, None, bag_name
@@ -120,7 +119,7 @@ if __name__ == '__main__':
 				continue
 
 			time_start = time.time()
-			features = compute_w_loader(loader, dataset_iter, model, verbose=1)
+			features = compute_w_loader(loader, dataset_iter, model)
 
 			time_elapsed = time.time() - time_start
 

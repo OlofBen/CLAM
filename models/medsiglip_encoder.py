@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from transformers import AutoModelForImageTextToText
+from transformers import AutoModelForVision2Seq
 
 class MedGemmaPatchEncoder(nn.Module):
     """
@@ -12,7 +12,7 @@ class MedGemmaPatchEncoder(nn.Module):
         print(f"Loading MedGemma components from {model_id}...")
         # Load the full model to extract internal modules
         # We use bfloat16 to match MedGemma's native precision
-        full_model = AutoModelForImageTextToText.from_pretrained(
+        full_model = AutoModelForVision2Seq.from_pretrained(
             model_id,
             dtype=torch.bfloat16,
             device_map=device
