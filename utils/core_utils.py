@@ -1,17 +1,18 @@
-import numpy as np
-import random
-import torch
-from utils.utils import *
 import os
-from dataset_modules.dataset_generic import save_splits
-from models.model_mil import MIL_fc, MIL_fc_mc
-from models.model_clam import CLAM_MB, CLAM_SB
-from sklearn.preprocessing import label_binarize
-from sklearn.metrics import roc_auc_score, roc_curve
-from sklearn.metrics import auc as calc_auc
+import random
 
-from torchvision.ops import sigmoid_focal_loss
+import numpy as np
+import torch
 import torch.nn.functional as F
+from dataset_modules.dataset_generic import save_splits
+from models.model_clam import CLAM_MB, CLAM_SB
+from models.model_mil import MIL_fc, MIL_fc_mc
+from sklearn.metrics import auc as calc_auc
+from sklearn.metrics import (f1_score, precision_score, recall_score,
+                             roc_auc_score, roc_curve)
+from sklearn.preprocessing import label_binarize
+from torchvision.ops import sigmoid_focal_loss
+from utils.utils import *
 
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -220,10 +221,10 @@ def train(datasets, cur, args):
     else:
         torch.save(model.state_dict(), os.path.join(args.results_dir, "s_{}_checkpoint.pt".format(cur)))
 
-    _, val_error, val_auc, _= summary(model, val_loader, args.n_classes)
+    _, val_error, val_auc, val_f1, val_precision, val_recall, _= summary(model, val_loader, args.n_classes)
     print('Val error: {:.4f}, ROC AUC: {:.4f}'.format(val_error, val_auc))
 
-    results_dict, test_error, test_auc, acc_logger = summary(model, test_loader, args.n_classes)
+    results_dict, test_error, test_auc, test_f1, test_precision, test_recall, acc_logger = summary(model, test_loader, args.n_classes)
     print('Test error: {:.4f}, ROC AUC: {:.4f}'.format(test_error, test_auc))
 
     for i in range(args.n_classes):
@@ -236,10 +237,14 @@ def train(datasets, cur, args):
     if writer:
         writer.add_scalar('final/val_error', val_error, 0)
         writer.add_scalar('final/val_auc', val_auc, 0)
+        writer.add_scalar('final/val_f1', val_f1, 0)
         writer.add_scalar('final/test_error', test_error, 0)
         writer.add_scalar('final/test_auc', test_auc, 0)
+        writer.add_scalar('final/test_f1', test_f1, 0)
         writer.close()
-    return results_dict, test_auc, val_auc, 1-test_error, 1-val_error 
+    
+    return (results_dict, test_auc, val_auc, 1-test_error, 1-val_error, 
+            test_f1, val_f1, test_precision, val_precision, test_recall, val_recall)
 
 
 def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, accumilation_steps = 1, writer = None, loss_fn = None):
@@ -516,6 +521,7 @@ def summary(model, loader, n_classes):
 
     all_probs = np.zeros((len(loader), n_classes))
     all_labels = np.zeros(len(loader))
+    all_preds = np.zeros(len(loader)) # Track predictions for F1/Precision/Recall
 
     slide_ids = loader.dataset.slide_data['slide_id']
     patient_results = {}
@@ -524,13 +530,16 @@ def summary(model, loader, n_classes):
         data = data.float()
         data, label = data.to(device), label.to(device)
         slide_id = slide_ids.iloc[batch_idx]
+        
         with torch.inference_mode():
             logits, Y_prob, Y_hat, _, _ = model(data)
 
         acc_logger.log(Y_hat, label)
         probs = Y_prob.cpu().numpy()
+        
         all_probs[batch_idx] = probs
         all_labels[batch_idx] = label.item()
+        all_preds[batch_idx] = Y_hat.item() # Store the predicted class
         
         patient_results.update({slide_id: {'slide_id': np.array(slide_id), 'prob': probs, 'label': label.item()}})
         error = calculate_error(Y_hat, label)
@@ -538,6 +547,7 @@ def summary(model, loader, n_classes):
 
     test_error /= len(loader)
 
+    # --- AUC Calculation ---
     if n_classes == 2:
         auc = roc_auc_score(all_labels, all_probs[:, 1])
         aucs = []
@@ -550,8 +560,12 @@ def summary(model, loader, n_classes):
                 aucs.append(calc_auc(fpr, tpr))
             else:
                 aucs.append(float('nan'))
-
         auc = np.nanmean(np.array(aucs))
 
+    # --- Additional Metrics ---
+    # We use 'macro' to treat all classes as equally important
+    f1 = f1_score(all_labels, all_preds, average=None, zero_division=0)
+    precision = precision_score(all_labels, all_preds, average=None, zero_division=0)
+    recall = recall_score(all_labels, all_preds, average=None, zero_division=0)
 
-    return patient_results, test_error, auc, acc_logger
+    return patient_results, test_error, auc, f1, precision, recall, acc_logger

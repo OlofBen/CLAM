@@ -34,11 +34,13 @@ def main(args):
         end = args.k
     else:
         end = args.k_end
+    # 1. Initialize new metric lists
+    all_test_auc, all_val_auc = [], []
+    all_test_acc, all_val_acc = [], []
+    all_test_f1, all_val_f1 = [], []
+    all_test_precision, all_val_precision = [], []
+    all_test_recall, all_val_recall = [], []
 
-    all_test_auc = []
-    all_val_auc = []
-    all_test_acc = []
-    all_val_acc = []
     folds = np.arange(start, end)
     for i in folds:
         seed_torch(args.seed)
@@ -46,18 +48,35 @@ def main(args):
                 csv_path='{}/splits_{}.csv'.format(args.split_dir, i))
         
         datasets = (train_dataset, val_dataset, test_dataset)
-        results, test_auc, val_auc, test_acc, val_acc  = train(datasets, i, args)
+        
+        # 2. Unpack the new metrics from your train function
+        # Note: Ensure your train() function is updated to return these!
+        results, test_auc, val_auc, test_acc, val_acc, test_f1, val_f1, test_prec, val_prec, test_recall, val_recall = train(datasets, i, args)
+        
         all_test_auc.append(test_auc)
         all_val_auc.append(val_auc)
         all_test_acc.append(test_acc)
         all_val_acc.append(val_acc)
-        #write results to pkl
+        all_test_f1.append(test_f1)
+        all_val_f1.append(val_f1)
+        all_test_precision.append(test_prec)
+        all_val_precision.append(val_prec)
+        all_test_recall.append(test_recall)
+        all_val_recall.append(val_recall)
+
+        # Write results to pkl
         filename = os.path.join(args.results_dir, 'split_{}_results.pkl'.format(i))
         save_pkl(filename, results)
 
-    final_df = pd.DataFrame({'folds': folds, 'test_auc': all_test_auc, 
-        'val_auc': all_val_auc, 'test_acc': all_test_acc, 'val_acc' : all_val_acc})
-
+    # 3. Add to the Summary DataFrame
+    final_df = pd.DataFrame({
+        'folds': folds, 
+        'test_auc': all_test_auc, 'val_auc': all_val_auc, 
+        'test_acc': all_test_acc, 'val_acc' : all_val_acc,
+        'test_f1': all_test_f1, 'val_f1': all_val_f1,
+        'test_precision': all_test_precision, 'val_precision': all_val_precision,
+        'test_recall': all_test_recall, 'val_recall': all_val_recall,
+    })
     if len(folds) != args.k:
         save_name = 'summary_partial_{}_{}.csv'.format(start, end)
     else:
