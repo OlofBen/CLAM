@@ -1,15 +1,35 @@
+import os
+import random
+
 import numpy as np
 import torch
-from utils.utils import *
-import os
+import torch.nn.functional as F
 from dataset_modules.dataset_generic import save_splits
-from models.model_mil import MIL_fc, MIL_fc_mc
 from models.model_clam import CLAM_MB, CLAM_SB
-from sklearn.preprocessing import label_binarize
-from sklearn.metrics import roc_auc_score, roc_curve
+from models.model_mil import MIL_fc, MIL_fc_mc
 from sklearn.metrics import auc as calc_auc
+from sklearn.metrics import (f1_score, precision_score, recall_score,
+                             roc_auc_score, roc_curve)
+from sklearn.preprocessing import label_binarize
+from torchvision.ops import sigmoid_focal_loss
+from utils.utils import *
 
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+class FocalLossWrapper(nn.Module):
+    def __init__(self, alpha=0.25, gamma=2.0, n_classes=2):
+        super(FocalLossWrapper, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.n_classes = n_classes
+
+    def forward(self, logits, targets):
+        # 1. Convert targets to one-hot encoding
+        # logits shape: [Batch, N_Classes], targets shape: [Batch]
+        targets_one_hot = F.one_hot(targets, num_classes=self.n_classes).float()
+        
+        # 2. Call torchvision focal loss
+        return sigmoid_focal_loss(logits, targets_one_hot, alpha=self.alpha, gamma=self.gamma, reduction='mean')
 
 class Accuracy_Logger(object):
     """Accuracy logger"""
@@ -120,7 +140,8 @@ def train(datasets, cur, args):
         if device.type == 'cuda':
             loss_fn = loss_fn.cuda()
     else:
-        loss_fn = nn.CrossEntropyLoss()
+        loss_fn = FocalLossWrapper(alpha=0.25, gamma=2.0, n_classes=args.n_classes)
+        #loss_fn = nn.CrossEntropyLoss()
     print('Done!')
     
     print('\nInit Model...', end=' ')
@@ -183,7 +204,7 @@ def train(datasets, cur, args):
 
     for epoch in range(args.max_epochs):
         if args.model_type in ['clam_sb', 'clam_mb'] and not args.no_inst_cluster:     
-            train_loop_clam(epoch, model, train_loader, optimizer, args.n_classes, args.bag_weight, writer, loss_fn)
+            train_loop_clam(epoch, model, train_loader, optimizer, args.n_classes, args.bag_weight, args.accumilation_steps, writer, loss_fn)
             stop = validate_clam(cur, epoch, model, val_loader, args.n_classes, 
                 early_stopping, writer, loss_fn, args.results_dir)
         
@@ -200,10 +221,10 @@ def train(datasets, cur, args):
     else:
         torch.save(model.state_dict(), os.path.join(args.results_dir, "s_{}_checkpoint.pt".format(cur)))
 
-    _, val_error, val_auc, _= summary(model, val_loader, args.n_classes)
+    _, val_error, val_auc, val_f1, val_precision, val_recall, _= summary(model, val_loader, args.n_classes)
     print('Val error: {:.4f}, ROC AUC: {:.4f}'.format(val_error, val_auc))
 
-    results_dict, test_error, test_auc, acc_logger = summary(model, test_loader, args.n_classes)
+    results_dict, test_error, test_auc, test_f1, test_precision, test_recall, acc_logger = summary(model, test_loader, args.n_classes)
     print('Test error: {:.4f}, ROC AUC: {:.4f}'.format(test_error, test_auc))
 
     for i in range(args.n_classes):
@@ -216,13 +237,17 @@ def train(datasets, cur, args):
     if writer:
         writer.add_scalar('final/val_error', val_error, 0)
         writer.add_scalar('final/val_auc', val_auc, 0)
+        writer.add_scalar('final/val_f1', val_f1, 0)
         writer.add_scalar('final/test_error', test_error, 0)
         writer.add_scalar('final/test_auc', test_auc, 0)
+        writer.add_scalar('final/test_f1', test_f1, 0)
         writer.close()
-    return results_dict, test_auc, val_auc, 1-test_error, 1-val_error 
+    
+    return (results_dict, test_auc, val_auc, 1-test_error, 1-val_error, 
+            test_f1, val_f1, test_precision, val_precision, test_recall, val_recall)
 
 
-def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, writer = None, loss_fn = None):
+def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, accumilation_steps = 1, writer = None, loss_fn = None):
     model.train()
     acc_logger = Accuracy_Logger(n_classes=n_classes)
     inst_logger = Accuracy_Logger(n_classes=n_classes)
@@ -234,6 +259,7 @@ def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, writ
 
     print('\n')
     for batch_idx, (data, label) in enumerate(loader):
+        data = data.float()
         data, label = data.to(device), label.to(device)
         logits, Y_prob, Y_hat, _, instance_dict = model(data, label=label, instance_eval=True)
 
@@ -261,10 +287,12 @@ def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, writ
         train_error += error
         
         # backward pass
-        total_loss.backward()
-        # step
-        optimizer.step()
-        optimizer.zero_grad()
+        loss_scaled = total_loss / accumilation_steps
+
+        loss_scaled.backward()
+        if (batch_idx + 1) % accumilation_steps == 0 or (batch_idx + 1) == len(loader):
+            optimizer.step()
+            optimizer.zero_grad()
 
     # calculate loss and error for epoch
     train_loss /= len(loader)
@@ -297,6 +325,7 @@ def train_loop(epoch, model, loader, optimizer, n_classes, writer = None, loss_f
 
     print('\n')
     for batch_idx, (data, label) in enumerate(loader):
+        data = data.float()
         data, label = data.to(device), label.to(device)
 
         logits, Y_prob, Y_hat, _, _ = model(data)
@@ -346,6 +375,7 @@ def validate(cur, epoch, model, loader, n_classes, early_stopping = None, writer
 
     with torch.no_grad():
         for batch_idx, (data, label) in enumerate(loader):
+            data = data.float()
             data, label = data.to(device, non_blocking=True), label.to(device, non_blocking=True)
 
             logits, Y_prob, Y_hat, _, _ = model(data)
@@ -408,6 +438,7 @@ def validate_clam(cur, epoch, model, loader, n_classes, early_stopping = None, w
     sample_size = model.k_sample
     with torch.inference_mode():
         for batch_idx, (data, label) in enumerate(loader):
+            data = data.float()
             data, label = data.to(device), label.to(device)      
             logits, Y_prob, Y_hat, _, instance_dict = model(data, label=label, instance_eval=True)
             acc_logger.log(Y_hat, label)
@@ -490,20 +521,25 @@ def summary(model, loader, n_classes):
 
     all_probs = np.zeros((len(loader), n_classes))
     all_labels = np.zeros(len(loader))
+    all_preds = np.zeros(len(loader)) # Track predictions for F1/Precision/Recall
 
     slide_ids = loader.dataset.slide_data['slide_id']
     patient_results = {}
 
     for batch_idx, (data, label) in enumerate(loader):
+        data = data.float()
         data, label = data.to(device), label.to(device)
         slide_id = slide_ids.iloc[batch_idx]
+        
         with torch.inference_mode():
             logits, Y_prob, Y_hat, _, _ = model(data)
 
         acc_logger.log(Y_hat, label)
         probs = Y_prob.cpu().numpy()
+        
         all_probs[batch_idx] = probs
         all_labels[batch_idx] = label.item()
+        all_preds[batch_idx] = Y_hat.item() # Store the predicted class
         
         patient_results.update({slide_id: {'slide_id': np.array(slide_id), 'prob': probs, 'label': label.item()}})
         error = calculate_error(Y_hat, label)
@@ -511,6 +547,7 @@ def summary(model, loader, n_classes):
 
     test_error /= len(loader)
 
+    # --- AUC Calculation ---
     if n_classes == 2:
         auc = roc_auc_score(all_labels, all_probs[:, 1])
         aucs = []
@@ -523,8 +560,12 @@ def summary(model, loader, n_classes):
                 aucs.append(calc_auc(fpr, tpr))
             else:
                 aucs.append(float('nan'))
-
         auc = np.nanmean(np.array(aucs))
 
+    # --- Additional Metrics ---
+    # We use 'macro' to treat all classes as equally important
+    f1 = f1_score(all_labels, all_preds, average=None, zero_division=0)
+    precision = precision_score(all_labels, all_preds, average=None, zero_division=0)
+    recall = recall_score(all_labels, all_preds, average=None, zero_division=0)
 
-    return patient_results, test_error, auc, acc_logger
+    return patient_results, test_error, auc, f1, precision, recall, acc_logger

@@ -21,7 +21,7 @@ def save_hdf5(output_path, asset_dict, attr_dict= None, mode='a', chunk_size=32)
                 data_type = val.dtype
                 chunk_shape = (chunk_size, ) + data_shape[1:]
                 maxshape = (None, ) + data_shape[1:]
-                dset = file.create_dataset(key, shape=data_shape, maxshape=maxshape, chunks=chunk_shape, dtype=data_type)
+                dset = file.create_dataset(key, shape=data_shape, maxshape=maxshape, chunks=chunk_shape, compression="gzip", compression_opts=4, dtype=data_type)
                 dset[:] = val
                 if attr_dict is not None:
                     if key in attr_dict.keys():

@@ -29,6 +29,7 @@ def segment(WSI_object, seg_params, filter_params):
 	# Segment
 	WSI_object.segmentTissue(**seg_params, filter_params=filter_params)
 
+
 	### Stop Seg Timers
 	seg_time_elapsed = time.time() - start_time   
 	return WSI_object, seg_time_elapsed
@@ -39,6 +40,7 @@ def patching(WSI_object, **kwargs):
 
 	# Patch
 	file_path = WSI_object.createPatches_bag_hdf5(**kwargs, save_coord=True)
+
 
 	### Stop Patch Timer
 	patch_time_elapsed = time.time() - start_time
@@ -189,7 +191,7 @@ def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_d
 				  use_default_params = False, 
 				  seg = False, save_mask = True, 
 				  stitch= False, 
-				  patch = False, auto_skip=True, process_list = None, num_workers=64):
+				  patch = False, auto_skip=True, process_list = None, num_workers=96):
 
 	slides = sorted(os.listdir(source))
 	slides = [slide for slide in slides if os.path.isfile(os.path.join(source, slide))]
@@ -312,11 +314,11 @@ if __name__ == '__main__':
 		if key not in ['source']:
 			os.makedirs(val, exist_ok=True)
 
-	seg_params = {'seg_level': int(args.seg_level), 'sthresh': 12, 'mthresh': 5, 'close': 4, 'use_otsu': False,
+	seg_params = {'seg_level': int(args.seg_level), 'sthresh': 130, 'mthresh': 5, 'close': 4, 'use_otsu': False,
 				  'keep_ids': 'none', 'exclude_ids': 'none'}
-	filter_params = {'a_t':20, 'a_h': 16, 'max_n_holes':8 }
+	filter_params = {'a_t':4, 'a_h': 16, 'max_n_holes':8 }
 	vis_params = {'vis_level': -1, 'line_thickness': 250}
-	patch_params = {'white_thresh': 5, 'black_thresh': 40, 'use_padding': True, 'contour_fn': 'four_pt'}
+	patch_params = {'white_thresh': 15, 'black_thresh': 40, 'use_padding': True, 'contour_fn': 'four_pt'}
 
 	if args.preset:
 		preset_df = pd.read_csv(os.path.join('presets', args.preset))
