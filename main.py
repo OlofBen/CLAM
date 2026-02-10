@@ -75,7 +75,7 @@ def main(args):
         'test_acc': all_test_acc, 'val_acc' : all_val_acc,
         'test_f1': all_test_f1, 'val_f1': all_val_f1,
         'test_precision': all_test_precision, 'val_precision': all_val_precision,
-        'test_precision': all_test_recall, 'val_precision': all_val_recall,
+        'test_recall': all_test_recall, 'val_recall': all_val_recall,
     })
     if len(folds) != args.k:
         save_name = 'summary_partial_{}_{}.csv'.format(start, end)

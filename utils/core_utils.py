@@ -564,8 +564,8 @@ def summary(model, loader, n_classes):
 
     # --- Additional Metrics ---
     # We use 'macro' to treat all classes as equally important
-    f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
-    precision = precision_score(all_labels, all_preds, average='macro', zero_division=0)
-    recall = recall_score(all_labels, all_preds, average='macro', zero_division=0)
+    f1 = f1_score(all_labels, all_preds, average=None, zero_division=0)
+    precision = precision_score(all_labels, all_preds, average=None, zero_division=0)
+    recall = recall_score(all_labels, all_preds, average=None, zero_division=0)
 
     return patient_results, test_error, auc, f1, precision, recall, acc_logger
