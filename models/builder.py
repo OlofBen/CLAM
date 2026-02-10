@@ -28,9 +28,9 @@ class TimmEncoderWrapper(nn.Module):
 
 class HFEncoderWrapper(nn.Module):
 	"""Wraps any HF Vision model to return only the pooled visual features."""
-	def __init__(self, model_id):
+	def __init__(self, model_id, trust_remote_code = False):
 		super().__init__()
-		self.model = AutoModel.from_pretrained(model_id, trust_remote_code=True)
+		self.model = AutoModel.from_pretrained(model_id, trust_remote_code=trust_remote_code)
 
 	def forward(self, x):
 		outputs = self.model(x)
@@ -50,7 +50,7 @@ class HFEncoderWrapper(nn.Module):
 		else:
 			return outputs[0]
 
-def get_encoder(model_name, target_img_size=224):
+def get_encoder(model_name, target_img_size=224, trust_remote_code = False):
 	"""
 	Revised get_encoder to support HF models and RetCCL.
 	Ex: 'facebook/vit-base-patch16-224' or 'microsoft/resnet-50'
@@ -129,11 +129,11 @@ def get_encoder(model_name, target_img_size=224):
 	# -----------------------------------------------------------
 	print(f"Attempting to load {model_name} from Hugging Face...")
 	try:
-		model = HFEncoderWrapper(model_name)
+		model = HFEncoderWrapper(model_name, trust_remote_code)
 
 		# Extract mean and std with safe defaults (ImageNet values)
 		try:
-			processor = AutoImageProcessor.from_pretrained(model_name, trust_remote_code=True)
+			processor = AutoImageProcessor.from_pretrained(model_name, trust_remote_code=trust_remote_code)
 			img_proc = getattr(processor, "image_processor", processor)
 			mean = getattr(img_proc, "image_mean", [0.485, 0.456, 0.406])
 			std = getattr(img_proc, "image_std", [0.229, 0.224, 0.225])

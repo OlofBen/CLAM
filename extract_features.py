@@ -64,6 +64,7 @@ parser.add_argument('--slide_ext', type=str, default= '.svs')
 parser.add_argument('--no_auto_skip', default=False, action='store_true')
 parser.add_argument('--target_patch_size', type=int, default=224,
 					help='the desired size of patches for scaling before feature embedding')
+parser.add_argument('--trust_remote_code', action='store_true', default=False)
 args = parser.parse_args()
 
 if __name__ == '__main__':
@@ -77,7 +78,7 @@ if __name__ == '__main__':
 	os.makedirs(os.path.join(args.feat_dir, 'h5_files'), exist_ok=True)
 	dest_files = os.listdir(os.path.join(args.feat_dir, 'pt_files'))
 
-	model, img_transforms = get_encoder(args.model_name, target_img_size=args.target_patch_size)		
+	model, img_transforms = get_encoder(args.model_name, target_img_size=args.target_patch_size, trust_remote_code=args.trust_remote_code)		
 	model = model.to(device)
 
 	if torch.cuda.device_count() > 1:
