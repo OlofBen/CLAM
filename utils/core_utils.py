@@ -27,7 +27,7 @@ class FocalLossWrapper(nn.Module):
         # 1. Convert targets to one-hot encoding
         # logits shape: [Batch, N_Classes], targets shape: [Batch]
         targets_one_hot = F.one_hot(targets, num_classes=self.n_classes).float()
-        
+
         # 2. Call torchvision focal loss
         return sigmoid_focal_loss(logits, targets_one_hot, alpha=self.alpha, gamma=self.gamma, reduction='mean')
 
@@ -40,13 +40,13 @@ class Accuracy_Logger(object):
 
     def initialize(self):
         self.data = [{"count": 0, "correct": 0} for i in range(self.n_classes)]
-    
+
     def log(self, Y_hat, Y):
         Y_hat = int(Y_hat)
         Y = int(Y)
         self.data[Y]["count"] += 1
         self.data[Y]["correct"] += (Y_hat == Y)
-    
+
     def log_batch(self, Y_hat, Y):
         Y_hat = np.array(Y_hat).astype(int)
         Y = np.array(Y).astype(int)
@@ -54,16 +54,16 @@ class Accuracy_Logger(object):
             cls_mask = Y == label_class
             self.data[label_class]["count"] += cls_mask.sum()
             self.data[label_class]["correct"] += (Y_hat[cls_mask] == Y[cls_mask]).sum()
-    
+
     def get_summary(self, c):
-        count = self.data[c]["count"] 
+        count = self.data[c]["count"]
         correct = self.data[c]["correct"]
-        
-        if count == 0: 
+
+        if count == 0:
             acc = None
         else:
             acc = float(correct) / count
-        
+
         return acc, correct, count
 
 class EarlyStopping:
@@ -74,7 +74,7 @@ class EarlyStopping:
             patience (int): How long to wait after last time validation loss improved.
                             Default: 20
             stop_epoch (int): Earliest epoch possible for stopping
-            verbose (bool): If True, prints a message for each validation loss improvement. 
+            verbose (bool): If True, prints a message for each validation loss improvement.
                             Default: False
         """
         self.patience = patience
@@ -110,7 +110,7 @@ class EarlyStopping:
         self.val_loss_min = val_loss
 
 def train(datasets, cur, args):
-    """   
+    """
         train for a single fold
     """
     print('\nTraining Fold {}!'.format(cur))
@@ -143,22 +143,22 @@ def train(datasets, cur, args):
         loss_fn = FocalLossWrapper(alpha=0.25, gamma=2.0, n_classes=args.n_classes)
         #loss_fn = nn.CrossEntropyLoss()
     print('Done!')
-    
+
     print('\nInit Model...', end=' ')
-    model_dict = {"dropout": args.drop_out, 
-                  'n_classes': args.n_classes, 
+    model_dict = {"dropout": args.drop_out,
+                  'n_classes': args.n_classes,
                   "embed_dim": args.embed_dim}
-    
+
     if args.model_size is not None and args.model_type != 'mil':
         model_dict.update({"size_arg": args.model_size})
-    
+
     if args.model_type in ['clam_sb', 'clam_mb']:
         if args.subtyping:
             model_dict.update({'subtyping': True})
-        
+
         if args.B > 0:
             model_dict.update({'k_sample': args.B})
-        
+
         if args.inst_loss == 'svm':
             from topk.svm import SmoothTop1SVM
             instance_loss_fn = SmoothTop1SVM(n_classes = 2)
@@ -166,20 +166,20 @@ def train(datasets, cur, args):
                 instance_loss_fn = instance_loss_fn.cuda()
         else:
             instance_loss_fn = nn.CrossEntropyLoss()
-        
+
         if args.model_type =='clam_sb':
             model = CLAM_SB(**model_dict, instance_loss_fn=instance_loss_fn)
         elif args.model_type == 'clam_mb':
             model = CLAM_MB(**model_dict, instance_loss_fn=instance_loss_fn)
         else:
             raise NotImplementedError
-    
+
     else: # args.model_type == 'mil'
         if args.n_classes > 2:
             model = MIL_fc_mc(**model_dict)
         else:
             model = MIL_fc(**model_dict)
-    
+
     _ = model.to(device)
     print('Done!')
     print_network(model)
@@ -187,7 +187,7 @@ def train(datasets, cur, args):
     print('\nInit optimizer ...', end=' ')
     optimizer = get_optim(model, args)
     print('Done!')
-    
+
     print('\nInit Loaders...', end=' ')
     train_loader = get_split_loader(train_split, training=True, testing = args.testing, weighted = args.weighted_sample)
     val_loader = get_split_loader(val_split,  testing = args.testing)
@@ -203,17 +203,17 @@ def train(datasets, cur, args):
     print('Done!')
 
     for epoch in range(args.max_epochs):
-        if args.model_type in ['clam_sb', 'clam_mb'] and not args.no_inst_cluster:     
+        if args.model_type in ['clam_sb', 'clam_mb'] and not args.no_inst_cluster:
             train_loop_clam(epoch, model, train_loader, optimizer, args.n_classes, args.bag_weight, args.accumilation_steps, writer, loss_fn)
-            stop = validate_clam(cur, epoch, model, val_loader, args.n_classes, 
+            stop = validate_clam(cur, epoch, model, val_loader, args.n_classes,
                 early_stopping, writer, loss_fn, args.results_dir)
-        
+
         else:
             train_loop(epoch, model, train_loader, optimizer, args.n_classes, writer, loss_fn)
-            stop = validate(cur, epoch, model, val_loader, args.n_classes, 
+            stop = validate(cur, epoch, model, val_loader, args.n_classes,
                 early_stopping, writer, loss_fn, args.results_dir)
-        
-        if stop: 
+
+        if stop:
             break
 
     if args.early_stopping:
@@ -242,8 +242,8 @@ def train(datasets, cur, args):
         writer.add_scalar('final/test_auc', test_auc, 0)
         writer.add_scalar('final/test_f1', test_f1, 0)
         writer.close()
-    
-    return (results_dict, test_auc, val_auc, 1-test_error, 1-val_error, 
+
+    return (results_dict, test_auc, val_auc, 1-test_error, 1-val_error,
             test_f1, val_f1, test_precision, val_precision, test_recall, val_recall)
 
 
@@ -251,7 +251,7 @@ def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, accu
     model.train()
     acc_logger = Accuracy_Logger(n_classes=n_classes)
     inst_logger = Accuracy_Logger(n_classes=n_classes)
-    
+
     train_loss = 0.
     train_error = 0.
     train_inst_loss = 0.
@@ -271,8 +271,8 @@ def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, accu
         inst_count+=1
         instance_loss_value = instance_loss.item()
         train_inst_loss += instance_loss_value
-        
-        total_loss = bag_weight * loss + (1-bag_weight) * instance_loss 
+
+        total_loss = bag_weight * loss + (1-bag_weight) * instance_loss
 
         inst_preds = instance_dict['inst_preds']
         inst_labels = instance_dict['inst_labels']
@@ -280,12 +280,12 @@ def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, accu
 
         train_loss += loss_value
         if (batch_idx + 1) % 20 == 0:
-            print('batch {}, loss: {:.4f}, instance_loss: {:.4f}, weighted_loss: {:.4f}, '.format(batch_idx, loss_value, instance_loss_value, total_loss.item()) + 
+            print('batch {}, loss: {:.4f}, instance_loss: {:.4f}, weighted_loss: {:.4f}, '.format(batch_idx, loss_value, instance_loss_value, total_loss.item()) +
                 'label: {}, bag_size: {}'.format(label.item(), data.size(0)))
 
         error = calculate_error(Y_hat, label)
         train_error += error
-        
+
         # backward pass
         loss_scaled = total_loss / accumilation_steps
 
@@ -297,7 +297,7 @@ def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, accu
     # calculate loss and error for epoch
     train_loss /= len(loader)
     train_error /= len(loader)
-    
+
     if inst_count > 0:
         train_inst_loss /= inst_count
         print('\n')
@@ -317,7 +317,7 @@ def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, accu
         writer.add_scalar('train/error', train_error, epoch)
         writer.add_scalar('train/clustering_loss', train_inst_loss, epoch)
 
-def train_loop(epoch, model, loader, optimizer, n_classes, writer = None, loss_fn = None):   
+def train_loop(epoch, model, loader, optimizer, n_classes, writer = None, loss_fn = None):
     model.train()
     acc_logger = Accuracy_Logger(n_classes=n_classes)
     train_loss = 0.
@@ -329,18 +329,18 @@ def train_loop(epoch, model, loader, optimizer, n_classes, writer = None, loss_f
         data, label = data.to(device), label.to(device)
 
         logits, Y_prob, Y_hat, _, _ = model(data)
-        
+
         acc_logger.log(Y_hat, label)
         loss = loss_fn(logits, label)
         loss_value = loss.item()
-        
+
         train_loss += loss_value
         if (batch_idx + 1) % 20 == 0:
             print('batch {}, loss: {:.4f}, label: {}, bag_size: {}'.format(batch_idx, loss_value, label.item(), data.size(0)))
-           
+
         error = calculate_error(Y_hat, label)
         train_error += error
-        
+
         # backward pass
         loss.backward()
         # step
@@ -362,14 +362,14 @@ def train_loop(epoch, model, loader, optimizer, n_classes, writer = None, loss_f
         writer.add_scalar('train/loss', train_loss, epoch)
         writer.add_scalar('train/error', train_error, epoch)
 
-   
+
 def validate(cur, epoch, model, loader, n_classes, early_stopping = None, writer = None, loss_fn = None, results_dir=None):
     model.eval()
     acc_logger = Accuracy_Logger(n_classes=n_classes)
     # loader.dataset.update_mode(True)
     val_loss = 0.
     val_error = 0.
-    
+
     prob = np.zeros((len(loader), n_classes))
     labels = np.zeros(len(loader))
 
@@ -381,27 +381,27 @@ def validate(cur, epoch, model, loader, n_classes, early_stopping = None, writer
             logits, Y_prob, Y_hat, _, _ = model(data)
 
             acc_logger.log(Y_hat, label)
-            
+
             loss = loss_fn(logits, label)
 
             prob[batch_idx] = Y_prob.cpu().numpy()
             labels[batch_idx] = label.item()
-            
+
             val_loss += loss.item()
             error = calculate_error(Y_hat, label)
             val_error += error
-            
+
 
     val_error /= len(loader)
     val_loss /= len(loader)
 
     if n_classes == 2:
         auc = roc_auc_score(labels, prob[:, 1])
-    
+
     else:
         auc = roc_auc_score(labels, prob, multi_class='ovr')
-    
-    
+
+
     if writer:
         writer.add_scalar('val/loss', val_loss, epoch)
         writer.add_scalar('val/auc', auc, epoch)
@@ -410,12 +410,12 @@ def validate(cur, epoch, model, loader, n_classes, early_stopping = None, writer
     print('\nVal Set, val_loss: {:.4f}, val_error: {:.4f}, auc: {:.4f}'.format(val_loss, val_error, auc))
     for i in range(n_classes):
         acc, correct, count = acc_logger.get_summary(i)
-        print('class {}: acc {}, correct {}/{}'.format(i, acc, correct, count))     
+        print('class {}: acc {}, correct {}/{}'.format(i, acc, correct, count))
 
     if early_stopping:
         assert results_dir
         early_stopping(epoch, val_loss, model, ckpt_name = os.path.join(results_dir, "s_{}_checkpoint.pt".format(cur)))
-        
+
         if early_stopping.early_stop:
             print("Early stopping")
             return True
@@ -432,23 +432,23 @@ def validate_clam(cur, epoch, model, loader, n_classes, early_stopping = None, w
     val_inst_loss = 0.
     val_inst_acc = 0.
     inst_count=0
-    
+
     prob = np.zeros((len(loader), n_classes))
     labels = np.zeros(len(loader))
     sample_size = model.k_sample
     with torch.inference_mode():
         for batch_idx, (data, label) in enumerate(loader):
             data = data.float()
-            data, label = data.to(device), label.to(device)      
+            data, label = data.to(device), label.to(device)
             logits, Y_prob, Y_hat, _, instance_dict = model(data, label=label, instance_eval=True)
             acc_logger.log(Y_hat, label)
-            
+
             loss = loss_fn(logits, label)
 
             val_loss += loss.item()
 
             instance_loss = instance_dict['instance_loss']
-            
+
             inst_count+=1
             instance_loss_value = instance_loss.item()
             val_inst_loss += instance_loss_value
@@ -459,7 +459,7 @@ def validate_clam(cur, epoch, model, loader, n_classes, early_stopping = None, w
 
             prob[batch_idx] = Y_prob.cpu().numpy()
             labels[batch_idx] = label.item()
-            
+
             error = calculate_error(Y_hat, label)
             val_error += error
 
@@ -487,7 +487,7 @@ def validate_clam(cur, epoch, model, loader, n_classes, early_stopping = None, w
         for i in range(2):
             acc, correct, count = inst_logger.get_summary(i)
             print('class {} clustering acc {}: correct {}/{}'.format(i, acc, correct, count))
-    
+
     if writer:
         writer.add_scalar('val/loss', val_loss, epoch)
         writer.add_scalar('val/auc', auc, epoch)
@@ -498,15 +498,15 @@ def validate_clam(cur, epoch, model, loader, n_classes, early_stopping = None, w
     for i in range(n_classes):
         acc, correct, count = acc_logger.get_summary(i)
         print('class {}: acc {}, correct {}/{}'.format(i, acc, correct, count))
-        
+
         if writer and acc is not None:
             writer.add_scalar('val/class_{}_acc'.format(i), acc, epoch)
-     
+
 
     if early_stopping:
         assert results_dir
         early_stopping(epoch, val_loss, model, ckpt_name = os.path.join(results_dir, "s_{}_checkpoint.pt".format(cur)))
-        
+
         if early_stopping.early_stop:
             print("Early stopping")
             return True
@@ -530,17 +530,17 @@ def summary(model, loader, n_classes):
         data = data.float()
         data, label = data.to(device), label.to(device)
         slide_id = slide_ids.iloc[batch_idx]
-        
+
         with torch.inference_mode():
             logits, Y_prob, Y_hat, _, _ = model(data)
 
         acc_logger.log(Y_hat, label)
         probs = Y_prob.cpu().numpy()
-        
+
         all_probs[batch_idx] = probs
         all_labels[batch_idx] = label.item()
         all_preds[batch_idx] = Y_hat.item() # Store the predicted class
-        
+
         patient_results.update({slide_id: {'slide_id': np.array(slide_id), 'prob': probs, 'label': label.item()}})
         error = calculate_error(Y_hat, label)
         test_error += error

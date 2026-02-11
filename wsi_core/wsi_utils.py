@@ -83,7 +83,7 @@ def initialize_hdf5_bag(first_patch, save_coord=False):
     # Initialize a resizable dataset to hold the output
     img_shape = img_patch.shape
     maxshape = (None,) + img_shape[1:] #maximum dimensions up to which dataset maybe resized (None means unlimited)
-    dset = file.create_dataset('imgs', 
+    dset = file.create_dataset('imgs',
                                 shape=img_shape, maxshape=maxshape,  chunks=img_shape, dtype=dtype)
 
     dset[:] = img_patch
@@ -111,7 +111,7 @@ def sample_indices(scores, k, start=0.48, end=0.52, convert_to_percentile=False,
     score_window = np.logical_and(scores >= start_value, scores <= end_value)
     indices = np.where(score_window)[0]
     if len(indices) < 1:
-        return -1 
+        return -1
     else:
         return np.random.choice(indices, min(k, len(indices)), replace=False)
 
@@ -124,7 +124,7 @@ def top_k(scores, k, invert=False):
 
 def to_percentiles(scores):
     from scipy.stats import rankdata
-    scores = rankdata(scores, 'average')/len(scores) * 100   
+    scores = rankdata(scores, 'average')/len(scores) * 100
     return scores
 
 def screen_coords(scores, coords, top_left, bot_right):
@@ -169,12 +169,12 @@ def DrawMap(canvas, patch_dset, coords, patch_size, indices=None, verbose=1, dra
     if verbose > 0:
         ten_percent_chunk = math.ceil(total * 0.1)
         print('start stitching {}'.format(patch_dset.attrs['wsi_name']))
-    
+
     for idx in range(total):
         if verbose > 0:
             if idx % ten_percent_chunk == 0:
                 print('progress: {}/{} stitched'.format(idx, total))
-        
+
         patch_id = indices[idx]
         patch = patch_dset[patch_id]
         patch = cv2.resize(patch, patch_size)
@@ -191,11 +191,11 @@ def DrawMapFromCoords(canvas, wsi_object, coords, patch_size, vis_level, indices
     if indices is None:
         indices = np.arange(len(coords))
     total = len(indices)
-        
+
     patch_size = tuple(np.ceil((np.array(patch_size)/np.array(downsamples))).astype(np.int32))
     print('downscaled patch size: {}x{}'.format(patch_size[0], patch_size[1]))
-    
-    for idx in tqdm(range(total)):        
+
+    for idx in tqdm(range(total)):
         patch_id = indices[idx]
         coord = coords[patch_id]
         patch = np.array(wsi_object.wsi.read_region(tuple(coord), vis_level, patch_size).convert("RGB"))
@@ -226,24 +226,24 @@ def StitchPatches(hdf5_file_path, downscale=16, draw_grid=False, bg_color=(0,0,0
     print('patch shape: {}'.format(img_shape))
     downscaled_shape = (img_shape[1] // downscale, img_shape[0] // downscale)
 
-    if w*h > Image.MAX_IMAGE_PIXELS: 
+    if w*h > Image.MAX_IMAGE_PIXELS:
         raise Image.DecompressionBombError("Visualization Downscale %d is too large" % downscale)
-    
+
     if alpha < 0 or alpha == -1:
         heatmap = Image.new(size=(w,h), mode="RGB", color=bg_color)
     else:
         heatmap = Image.new(size=(w,h), mode="RGBA", color=bg_color + (int(255 * alpha),))
-    
+
     heatmap = np.array(heatmap)
     heatmap = DrawMap(heatmap, dset, coords, downscaled_shape, indices=None, draw_grid=draw_grid)
-    
+
     return heatmap
 
 def StitchCoords(hdf5_file_path, wsi_object, downscale=16, draw_grid=False, bg_color=(0,0,0), alpha=-1):
     wsi = wsi_object.getOpenSlide()
     w, h = wsi.level_dimensions[0]
     print('original size: {} x {}'.format(w, h))
-    
+
     vis_level = wsi.get_best_level_for_downsample(downscale)
     w, h = wsi.level_dimensions[vis_level]
     print('downscaled size for stiching: {} x {}'.format(w, h))
@@ -254,33 +254,33 @@ def StitchCoords(hdf5_file_path, wsi_object, downscale=16, draw_grid=False, bg_c
         print('start stitching {}'.format(dset.attrs['name']))
         patch_size = dset.attrs['patch_size']
         patch_level = dset.attrs['patch_level']
-    
+
     print(f'number of patches: {len(coords)}')
     print(f'patch size: {patch_size} x {patch_size} patch level: {patch_level}')
     patch_size = tuple((np.array((patch_size, patch_size)) * wsi.level_downsamples[patch_level]).astype(np.int32))
     print(f'ref patch size: {patch_size} x {patch_size}')
 
-    if w*h > Image.MAX_IMAGE_PIXELS: 
+    if w*h > Image.MAX_IMAGE_PIXELS:
         raise Image.DecompressionBombError("Visualization Downscale %d is too large" % downscale)
-    
+
     if alpha < 0 or alpha == -1:
         heatmap = Image.new(size=(w,h), mode="RGB", color=bg_color)
     else:
         heatmap = Image.new(size=(w,h), mode="RGBA", color=bg_color + (int(255 * alpha),))
-    
+
     heatmap = np.array(heatmap)
     heatmap = DrawMapFromCoords(heatmap, wsi_object, coords, patch_size, vis_level, indices=None, draw_grid=draw_grid)
     return heatmap
 
-def SamplePatches(coords_file_path, save_file_path, wsi_object, 
+def SamplePatches(coords_file_path, save_file_path, wsi_object,
     patch_level=0, custom_downsample=1, patch_size=256, sample_num=100, seed=1, stitch=True, verbose=1, mode='w'):
-    
+
     with h5py.File(coords_file_path, 'r') as file:
         dset = file['coords']
         coords = dset[:]
         h5_patch_size = dset.attrs['patch_size']
         h5_patch_level = dset.attrs['patch_level']
-    
+
     if verbose>0:
         print('in .h5 file: total number of patches: {}'.format(len(coords)))
         print('in .h5 file: patch size: {}x{} patch level: {}'.format(h5_patch_size, h5_patch_size, h5_patch_level))
@@ -295,15 +295,15 @@ def SamplePatches(coords_file_path, save_file_path, wsi_object,
     indices = np.random.choice(np.arange(len(coords)), min(len(coords), sample_num), replace=False)
 
     target_patch_size = np.array([patch_size, patch_size])
-    
+
     if custom_downsample > 1:
         target_patch_size = (np.array([patch_size, patch_size]) / custom_downsample).astype(np.int32)
-        
+
     if stitch:
         canvas = Mosaic_Canvas(patch_size=target_patch_size[0], n=sample_num, downscale=4, n_per_row=10, bg_color=(0,0,0), alpha=-1)
     else:
         canvas = None
-    
+
     for idx in indices:
         coord = coords[idx]
         patch = wsi_object.wsi.read_region(coord, patch_level, tuple([patch_size, patch_size])).convert('RGB')

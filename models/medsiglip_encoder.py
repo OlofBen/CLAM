@@ -36,4 +36,4 @@ class MedGemmaPatchEncoder(nn.Module):
             # Get the raw tokens from the vision tower (usually 256 tokens)
             res = self.vision_tower(x).last_hidden_state
             # Return the mean of tokens to get a single 1024-dim patch vector
-            return res.mean(dim=1) 
+            return res.mean(dim=1)
