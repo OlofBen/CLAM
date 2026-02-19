@@ -92,7 +92,7 @@ if __name__ == '__main__':
                     'pin_memory': True,
                     'persistent_workers': False,
                     } if device.type == "cuda" else {}
-    num_prefetch = 2
+    num_prefetch = 4
 
     total = len(bags_dataset)
 

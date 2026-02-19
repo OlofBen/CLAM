@@ -6,7 +6,7 @@ from torchvision import models
 # -------------------------------------------------------------------------
 # Set the path to your downloaded RetCCL weights here
 # -------------------------------------------------------------------------
-RETCCL_WEIGHTS_PATH = 'workspace/models/retccl.pth'
+RETCCL_WEIGHTS_PATH = '/workspace/models/retccl.pth'
 # -------------------------------------------------------------------------
 
 class RetCCLEncoder(nn.Module):
