@@ -221,10 +221,10 @@ def train(datasets, cur, args):
     else:
         torch.save(model.state_dict(), os.path.join(args.results_dir, "s_{}_checkpoint.pt".format(cur)))
 
-    _, val_error, val_auc, val_f1, val_precision, val_recall, _= summary(model, val_loader, args.n_classes)
+    val_results, val_error, val_auc, val_f1, val_precision, val_recall, _ = summary(model, val_loader, args.n_classes)
     print('Val error: {:.4f}, ROC AUC: {:.4f}'.format(val_error, val_auc))
 
-    results_dict, test_error, test_auc, test_f1, test_precision, test_recall, acc_logger = summary(model, test_loader, args.n_classes)
+    test_results, test_error, test_auc, test_f1, test_precision, test_recall, acc_logger = summary(model, test_loader, args.n_classes)
     print('Test error: {:.4f}, ROC AUC: {:.4f}'.format(test_error, test_auc))
 
     for i in range(args.n_classes):
@@ -243,9 +243,8 @@ def train(datasets, cur, args):
         writer.add_scalar('final/test_f1', test_f1, 0)
         writer.close()
 
-    return (results_dict, test_auc, val_auc, 1-test_error, 1-val_error,
-            test_f1, val_f1, test_precision, val_precision, test_recall, val_recall)
-
+    return (test_results, val_results, test_auc, val_auc, 1-test_error, 1-val_error,
+        test_f1, val_f1, test_precision, val_precision, test_recall, val_recall)
 
 def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, accumilation_steps = 1, writer = None, loss_fn = None):
     model.train()
@@ -279,9 +278,9 @@ def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, accu
         inst_logger.log_batch(inst_preds, inst_labels)
 
         train_loss += loss_value
-        if (batch_idx + 1) % 20 == 0:
-            print('batch {}, loss: {:.4f}, instance_loss: {:.4f}, weighted_loss: {:.4f}, '.format(batch_idx, loss_value, instance_loss_value, total_loss.item()) +
-                'label: {}, bag_size: {}'.format(label.item(), data.size(0)))
+        # if (batch_idx + 1) % 20 == 0:
+            # print('batch {}, loss: {:.4f}, instance_loss: {:.4f}, weighted_loss: {:.4f}, '.format(batch_idx, loss_value, instance_loss_value, total_loss.item()) +
+                # 'label: {}, bag_size: {}'.format(label.item(), data.size(0)))
 
         error = calculate_error(Y_hat, label)
         train_error += error

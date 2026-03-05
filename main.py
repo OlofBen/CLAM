@@ -51,7 +51,7 @@ def main(args):
 
         # 2. Unpack the new metrics from your train function
         # Note: Ensure your train() function is updated to return these!
-        results, test_auc, val_auc, test_acc, val_acc, test_f1, val_f1, test_prec, val_prec, test_recall, val_recall = train(datasets, i, args)
+        val_results, test_results, test_auc, val_auc, test_acc, val_acc, test_f1, val_f1, test_prec, val_prec, test_recall, val_recall = train(datasets, i, args)
 
         all_test_auc.append(test_auc)
         all_val_auc.append(val_auc)
@@ -64,9 +64,14 @@ def main(args):
         all_test_recall.append(test_recall)
         all_val_recall.append(val_recall)
 
+        combined_results = {
+            'test': test_results,
+            'val': val_results
+        }
+
         # Write results to pkl
         filename = os.path.join(args.results_dir, 'split_{}_results.pkl'.format(i))
-        save_pkl(filename, results)
+        save_pkl(filename, combined_results)
 
     # 3. Add to the Summary DataFrame
     final_df = pd.DataFrame({
