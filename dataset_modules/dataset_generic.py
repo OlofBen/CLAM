@@ -323,19 +323,30 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
     def __init__(self,
         data_dir,
         bag_dropout = 0.2,
+        cox_survival = False,
         **kwargs):
 
         super(Generic_MIL_Dataset, self).__init__(**kwargs)
         self.data_dir = data_dir
         self.use_h5 = False
         self.bag_dropout = bag_dropout
+        self.cox_survival = cox_survival # New flag
 
     def load_from_h5(self, toggle):
         self.use_h5 = toggle
 
     def __getitem__(self, idx):
         slide_id = self.slide_data['slide_id'][idx]
-        label = self.slide_data['label'][idx]
+
+        # --- Handle Labels ---
+        if self.cox_survival:
+            # Assumes CSV has 'survival_time' and 'event' columns
+            time = self.slide_data['survival_time'][idx]
+            event = self.slide_data['event'][idx]
+            label = torch.tensor([time, event], dtype=torch.float32)
+        else:
+            label = self.slide_data['label'][idx]
+
         if type(self.data_dir) == dict:
             source = self.slide_data['source'][idx]
             data_dir = self.data_dir[source]
@@ -372,15 +383,19 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
             return features, label, coords
 
 class Generic_Split(Generic_MIL_Dataset):
-    def __init__(self, slide_data, data_dir=None, num_classes=2, bag_dropout = 0.2):
+    def __init__(self, slide_data, data_dir=None, num_classes=2, bag_dropout = 0.2, cox_survival = False):
         self.use_h5 = False
         self.slide_data = slide_data
         self.data_dir = data_dir
         self.num_classes = num_classes
-        self.slide_cls_ids = [[] for i in range(self.num_classes)]
         self.bag_dropout = bag_dropout
-        for i in range(self.num_classes):
-            self.slide_cls_ids[i] = np.where(self.slide_data['label'] == i)[0]
+        self.cox_survival = cox_survival
+        if not self.cox_survival:
+            self.slide_cls_ids = [[] for i in range(self.num_classes)]
+            for i in range(self.num_classes):
+                self.slide_cls_ids[i] = np.where(self.slide_data['label'] == i)[0]
+        else:
+            self.slide_cls_ids = [] # Not used in survival sampling
 
     def __len__(self):
         return len(self.slide_data)

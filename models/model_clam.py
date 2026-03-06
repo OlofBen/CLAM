@@ -252,3 +252,62 @@ class CLAM_MB(CLAM_SB):
         if return_features:
             results_dict.update({'features': M})
         return logits, Y_prob, Y_hat, A_raw, results_dict
+
+class CLAM_Survival(CLAM_SB):
+    def __init__(self, gate=True, size_arg="small", dropout=0., k_sample=8,
+                 instance_loss_fn=nn.CrossEntropyLoss(), embed_dim=1024):
+        super(CLAM_Survival, self).__init__(gate=gate, size_arg=size_arg, dropout=dropout,
+                                           k_sample=k_sample, n_classes=1,
+                                           instance_loss_fn=instance_loss_fn,
+                                           subtyping=False, embed_dim=embed_dim)
+
+        # Override the classifier to be a single hazard node
+        self.classifiers = nn.Linear(self.size_dict[size_arg][1], 1)
+
+        # Instance classifier for survival still uses 2 classes (High vs Low Risk pseudo-labels)
+        # We only need one instance classifier because we have one 'bag' output
+        self.instance_classifiers = nn.ModuleList([nn.Linear(self.size_dict[size_arg][1], 2)])
+
+    def forward(self, h, label=None, instance_eval=False, return_features=False, attention_only=False):
+        # h: bag of features [N x L]
+        # label: pseudo-label (0 for Low Risk, 1 for High Risk) for instance supervision
+
+        A, h = self.attention_net(h)  # Nx1
+        A = torch.transpose(A, 1, 0)  # 1xN
+        if attention_only:
+            return A
+
+        A_raw = A
+        A = F.softmax(A, dim=1)  # Softmax over patches
+
+        if instance_eval:
+            # For survival, 'label' passed here is the pseudo-label (High/Low risk)
+            # We treat this like a binary classification for the clustering branch
+            classifier = self.instance_classifiers[0]
+            if label.item() == 1: # High Risk (Event occurred early)
+                instance_loss, preds, targets = self.inst_eval(A, h, classifier)
+            else: # Low Risk (Censored or Event occurred late)
+                # In survival, we treat 'low risk' as the negative class
+                instance_loss, preds, targets = self.inst_eval_out(A, h, classifier)
+
+            results_dict = {
+                'instance_loss': instance_loss,
+                'inst_labels': np.array(targets.cpu()),
+                'inst_preds': np.array(preds.cpu())
+            }
+        else:
+            results_dict = {}
+
+        # Generate Bag-level Hazard Score
+        M = torch.mm(A, h) # [1 x size]
+        logits = self.classifiers(M) # [1 x 1] (Hazard Score)
+
+        # For Survival, Y_prob and Y_hat are less relevant during training
+        # but kept for API consistency. Y_prob here is sigmoid of hazard.
+        Y_prob = torch.sigmoid(logits)
+        Y_hat = (logits > 0).float()
+
+        if return_features:
+            results_dict.update({'features': M})
+
+        return logits, Y_prob, Y_hat, A_raw, results_dict

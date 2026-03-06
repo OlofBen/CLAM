@@ -5,13 +5,14 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from dataset_modules.dataset_generic import save_splits
-from models.model_clam import CLAM_MB, CLAM_SB
+from models.model_clam import CLAM_MB, CLAM_SB, CLAM_Survival
 from models.model_mil import MIL_fc, MIL_fc_mc
 from sklearn.metrics import auc as calc_auc
 from sklearn.metrics import (f1_score, precision_score, recall_score,
                              roc_auc_score, roc_curve)
 from sklearn.preprocessing import label_binarize
 from torchvision.ops import sigmoid_focal_loss
+from lifelines.utils import concordance_index
 from utils.utils import *
 
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -30,6 +31,34 @@ class FocalLossWrapper(nn.Module):
 
         # 2. Call torchvision focal loss
         return sigmoid_focal_loss(logits, targets_one_hot, alpha=self.alpha, gamma=self.gamma, reduction='mean')
+
+class CoxLoss(nn.Module):
+    def __init__(self):
+        super(CoxLoss, self).__init__()
+
+    def forward(self, hazards, times, events):
+        # hazards: Predicted risk scores [Batch, 1]
+        # times: Survival times [Batch]
+        # events: Event indicators [Batch] (1=died, 0=censored)
+
+        hazards = hazards.view(-1)
+        times = times.view(-1)
+        events = events.view(-1)
+
+        # 1. Sort by survival time (descending)
+        _, idx = torch.sort(times, descending=True)
+        hazards = hazards[idx]
+        events = events[idx]
+
+        # 2. Log-sum-exp of hazards for the risk set
+        # This calculates the denominator of the Cox partial likelihood
+        log_cumsum_h = torch.logcumsumexp(hazards, dim=0)
+
+        # 3. Compute Negative Log Partial Likelihood
+        # We only sum the terms where an event actually occurred
+        loss = -torch.sum(events * (hazards - log_cumsum_h)) / (torch.sum(events) + 1e-8)
+
+        return loss
 
 class Accuracy_Logger(object):
     """Accuracy logger"""
@@ -144,43 +173,52 @@ def train(datasets, cur, args):
         #loss_fn = nn.CrossEntropyLoss()
     print('Done!')
 
-    print('\nInit Model...', end=' ')
     model_dict = {"dropout": args.drop_out,
-                  'n_classes': args.n_classes,
-                  "embed_dim": args.embed_dim}
+                'n_classes': args.n_classes,
+                "embed_dim": args.embed_dim}
 
     if args.model_size is not None and args.model_type != 'mil':
         model_dict.update({"size_arg": args.model_size})
 
-    if args.model_type in ['clam_sb', 'clam_mb']:
-        if args.subtyping:
-            model_dict.update({'subtyping': True})
+    if args.inst_loss == 'svm':
+        from topk.svm import SmoothTop1SVM
+        instance_loss_fn = SmoothTop1SVM(n_classes = 2)
+        if device.type == 'cuda':
+            instance_loss_fn = instance_loss_fn.cuda()
+    else:
+        instance_loss_fn = nn.CrossEntropyLoss()
 
-        if args.B > 0:
-            model_dict.update({'k_sample': args.B})
+    if args.cox_survival:
+        print('\nInit Survival Model...', end=' ')
+        model = CLAM_Survival(**model_dict, instance_loss_fn=instance_loss_fn)
+        loss_fn = CoxLoss()
+        # Calculate training median survival for pseudo-labels
+        # Assumes slide_data has 'survival_time'
+        train_times = train_split.slide_data['survival_time'].values
+        median_survival = np.median(train_times)
+        print(f'Done! Median Survival: {median_survival:.2f}')
+    else:
+        if args.model_type in ['clam_sb', 'clam_mb']:
+            if args.subtyping:
+                model_dict.update({'subtyping': True})
 
-        if args.inst_loss == 'svm':
-            from topk.svm import SmoothTop1SVM
-            instance_loss_fn = SmoothTop1SVM(n_classes = 2)
-            if device.type == 'cuda':
-                instance_loss_fn = instance_loss_fn.cuda()
-        else:
-            instance_loss_fn = nn.CrossEntropyLoss()
+            if args.B > 0:
+                model_dict.update({'k_sample': args.B})
 
-        if args.model_type =='clam_sb':
-            model = CLAM_SB(**model_dict, instance_loss_fn=instance_loss_fn)
-        elif args.model_type == 'clam_mb':
-            model = CLAM_MB(**model_dict, instance_loss_fn=instance_loss_fn)
-        else:
-            raise NotImplementedError
+            if args.model_type =='clam_sb':
+                model = CLAM_SB(**model_dict, instance_loss_fn=instance_loss_fn)
+            elif args.model_type == 'clam_mb':
+                model = CLAM_MB(**model_dict, instance_loss_fn=instance_loss_fn)
+            else:
+                raise NotImplementedError
 
-    else: # args.model_type == 'mil'
-        if args.n_classes > 2:
-            model = MIL_fc_mc(**model_dict)
-        else:
-            model = MIL_fc(**model_dict)
+        else: # args.model_type == 'mil'
+            if args.n_classes > 2:
+                model = MIL_fc_mc(**model_dict)
+            else:
+                model = MIL_fc(**model_dict)
 
-    _ = model.to(device)
+    model.to(device)
     print('Done!')
     print_network(model)
 
@@ -203,7 +241,12 @@ def train(datasets, cur, args):
     print('Done!')
 
     for epoch in range(args.max_epochs):
-        if args.model_type in ['clam_sb', 'clam_mb'] and not args.no_inst_cluster:
+        if args.cox_survival:
+            train_loop_survival(epoch, model, train_loader, optimizer, args.n_classes,
+                                args.bag_weight, args.accumilation_steps, writer, loss_fn, median_survival)
+            stop = validate_survival(cur, epoch, model, val_loader, early_stopping, writer, loss_fn, args.results_dir)
+
+        elif args.model_type in ['clam_sb', 'clam_mb'] and not args.no_inst_cluster:
             train_loop_clam(epoch, model, train_loader, optimizer, args.n_classes, args.bag_weight, args.accumilation_steps, writer, loss_fn)
             stop = validate_clam(cur, epoch, model, val_loader, args.n_classes,
                 early_stopping, writer, loss_fn, args.results_dir)
@@ -221,30 +264,138 @@ def train(datasets, cur, args):
     else:
         torch.save(model.state_dict(), os.path.join(args.results_dir, "s_{}_checkpoint.pt".format(cur)))
 
-    val_results, val_error, val_auc, val_f1, val_precision, val_recall, _ = summary(model, val_loader, args.n_classes)
-    print('Val error: {:.4f}, ROC AUC: {:.4f}'.format(val_error, val_auc))
+    if args.cox_survival:
+        # 1. Run final evaluation on Val and Test
+        val_results, val_cindex = summary_survival(model, val_loader)
+        test_results, test_cindex = summary_survival(model, test_loader)
 
-    test_results, test_error, test_auc, test_f1, test_precision, test_recall, acc_logger = summary(model, test_loader, args.n_classes)
-    print('Test error: {:.4f}, ROC AUC: {:.4f}'.format(test_error, test_auc))
+        print(f'Final Val C-Index: {val_cindex:.4f}')
+        print(f'Final Test C-Index: {test_cindex:.4f}')
 
-    for i in range(args.n_classes):
-        acc, correct, count = acc_logger.get_summary(i)
-        print('class {}: acc {}, correct {}/{}'.format(i, acc, correct, count))
+        # 2. Map C-index to the 'AUC' slots and 0 for classification-only metrics
+        # (test_results, val_results, test_auc, val_auc, test_acc, val_acc, f1, prec, recall)
+        return (test_results, val_results, test_cindex, val_cindex,
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    else:
+        val_results, val_error, val_auc, val_f1, val_precision, val_recall, _ = summary(model, val_loader, args.n_classes)
+        print('Val error: {:.4f}, ROC AUC: {:.4f}'.format(val_error, val_auc))
+
+        test_results, test_error, test_auc, test_f1, test_precision, test_recall, acc_logger = summary(model, test_loader, args.n_classes)
+        print('Test error: {:.4f}, ROC AUC: {:.4f}'.format(test_error, test_auc))
+
+        for i in range(args.n_classes):
+            acc, correct, count = acc_logger.get_summary(i)
+            print('class {}: acc {}, correct {}/{}'.format(i, acc, correct, count))
+
+            if writer:
+                writer.add_scalar('final/test_class_{}_acc'.format(i), acc, 0)
 
         if writer:
-            writer.add_scalar('final/test_class_{}_acc'.format(i), acc, 0)
+            writer.add_scalar('final/val_error', val_error, 0)
+            writer.add_scalar('final/val_auc', val_auc, 0)
+            writer.add_scalar('final/val_f1', val_f1, 0)
+            writer.add_scalar('final/test_error', test_error, 0)
+            writer.add_scalar('final/test_auc', test_auc, 0)
+            writer.add_scalar('final/test_f1', test_f1, 0)
+            writer.close()
+
+        return (test_results, val_results, test_auc, val_auc, 1-test_error, 1-val_error,
+            test_f1, val_f1, test_precision, val_precision, test_recall, val_recall)
+
+def train_loop_survival(epoch, model, loader, optimizer, n_classes, bag_weight,
+                        accumulation_steps, writer, loss_fn, median_survival):
+    model.train()
+
+    # We must collect hazards across accumulation steps for the Cox ranking
+    accum_hazards = []
+    accum_times = []
+    accum_events = []
+
+    total_inst_loss = 0.
+
+    for batch_idx, (data, label) in enumerate(loader):
+        data = data.to(device)
+        # label is [time, event]
+        t, e = label[:, 0].to(device), label[:, 1].to(device)
+
+        # 1. Generate Pseudo-label for CLAM's internal clustering
+        # If they died earlier than median, they are 'high risk' (class 1)
+        pseudo_label = (t < median_survival).long() if e == 1 else torch.tensor([0]).to(device)
+
+        # 2. Forward pass (Y_hat here will be the scalar hazard score)
+        logits, Y_prob, Y_hat, _, instance_dict = model(data, label=pseudo_label, instance_eval=True)
+
+        inst_loss = instance_dict['instance_loss']
+        total_inst_loss += inst_loss.item()
+
+        # Store for the Cox batch
+        accum_hazards.append(logits)
+        accum_times.append(t)
+        accum_events.append(e)
+
+        # 3. Calculate Loss and Step
+        if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1) == len(loader):
+            # Combine gathered hazard scores
+            h_batch = torch.cat(accum_hazards)
+            t_batch = torch.cat(accum_times)
+            e_batch = torch.cat(accum_events)
+
+            bag_loss = loss_fn(h_batch, t_batch, e_batch)
+
+            # Combine with the last instance_loss (or an average)
+            total_loss = (bag_weight * bag_loss) + ((1 - bag_weight) * inst_loss)
+
+            total_loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+            # Clear accumulation lists
+            accum_hazards, accum_times, accum_events = [], [], []
+
+    print(f"Epoch {epoch} Survival Training Complete.")
+
+def validate_survival(cur, epoch, model, loader, early_stopping=None, writer=None, loss_fn=None, results_dir=None):
+    model.eval()
+    val_loss = 0.
+    all_hazards = []
+    all_times = []
+    all_events = []
+
+    with torch.no_grad():
+        for batch_idx, (data, label) in enumerate(loader):
+            data = data.to(device)
+            t, e = label[:, 0], label[:, 1]
+
+            # Forward pass: logits here is the hazard score
+            logits, _, _, _, _ = model(data)
+
+            all_hazards.append(logits.cpu().numpy())
+            all_times.append(t.numpy())
+            all_events.append(e.numpy())
+
+    # Concatenate results for the whole validation set
+    all_hazards = np.concatenate(all_hazards).ravel()
+    all_times = np.concatenate(all_times).ravel()
+    all_events = np.concatenate(all_events).ravel()
+
+    # Calculate Cox Loss for the full validation set
+    val_loss = loss_fn(torch.tensor(all_hazards), torch.tensor(all_times), torch.tensor(all_events))
+
+    # C-Index: measures how well the model ranks survival times
+    # Note: concordance_index expects (actual_times, predicted_scores, event_observed)
+    # Since higher hazard = shorter life, we pass -hazards to align with time
+    c_index = concordance_index(all_times, -all_hazards, all_events)
 
     if writer:
-        writer.add_scalar('final/val_error', val_error, 0)
-        writer.add_scalar('final/val_auc', val_auc, 0)
-        writer.add_scalar('final/val_f1', val_f1, 0)
-        writer.add_scalar('final/test_error', test_error, 0)
-        writer.add_scalar('final/test_auc', test_auc, 0)
-        writer.add_scalar('final/test_f1', test_f1, 0)
-        writer.close()
+        writer.add_scalar('val/loss', val_loss, epoch)
+        writer.add_scalar('val/c_index', c_index, epoch)
 
-    return (test_results, val_results, test_auc, val_auc, 1-test_error, 1-val_error,
-        test_f1, val_f1, test_precision, val_precision, test_recall, val_recall)
+    print(f'\nVal Set, loss: {val_loss:.4f}, C-Index: {c_index:.4f}')
+
+    if early_stopping:
+        early_stopping(epoch, val_loss, model, ckpt_name=os.path.join(results_dir, f"s_{cur}_checkpoint.pt"))
+        if early_stopping.early_stop: return True
+    return False
 
 def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, accumilation_steps = 1, writer = None, loss_fn = None):
     model.train()
@@ -568,3 +719,49 @@ def summary(model, loader, n_classes):
     recall = recall_score(all_labels, all_preds, average=None, zero_division=0)
 
     return patient_results, test_error, auc, f1, precision, recall, acc_logger
+
+def summary_survival(model, loader):
+    model.eval()
+
+    all_hazards = []
+    all_times = []
+    all_events = []
+    patient_results = {}
+
+    slide_ids = loader.dataset.slide_data['slide_id']
+
+    print('\nEvaluating Survival Performance...')
+    with torch.inference_mode():
+        for batch_idx, (data, label) in enumerate(loader):
+            data = data.to(device)
+            # label is [time, event]
+            t, e = label[:, 0], label[:, 1]
+            slide_id = slide_ids.iloc[batch_idx]
+
+            # Logits is the predicted log-hazard ratio
+            logits, _, _, _, _ = model(data)
+            hazard = logits.cpu().numpy().item()
+
+            all_hazards.append(hazard)
+            all_times.append(t.item())
+            all_events.append(e.item())
+
+            patient_results.update({
+                slide_id: {
+                    'slide_id': slide_id,
+                    'hazard': hazard,
+                    'time': t.item(),
+                    'event': e.item()
+                }
+            })
+
+    all_hazards = np.array(all_hazards)
+    all_times = np.array(all_times)
+    all_events = np.array(all_events)
+
+    # C-index calculation:
+    # We use -all_hazards because lifelines expects higher values to mean longer survival
+    # (or you can use the hazard directly if the function signature allows)
+    c_index = concordance_index(all_times, -all_hazards, all_events)
+
+    return patient_results, c_index
