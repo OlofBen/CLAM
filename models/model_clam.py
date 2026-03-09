@@ -255,7 +255,7 @@ class CLAM_MB(CLAM_SB):
 
 class CLAM_Survival(CLAM_SB):
     def __init__(self, gate=True, size_arg="small", dropout=0., k_sample=8,
-                 instance_loss_fn=nn.CrossEntropyLoss(), embed_dim=1024):
+                 instance_loss_fn=nn.CrossEntropyLoss(), embed_dim=1024, n_classes = 1):
         super(CLAM_Survival, self).__init__(gate=gate, size_arg=size_arg, dropout=dropout,
                                            k_sample=k_sample, n_classes=1,
                                            instance_loss_fn=instance_loss_fn,

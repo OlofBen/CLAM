@@ -40,6 +40,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
         patient_strat=False,
         label_col = None,
         patient_voting = 'max',
+        cox_survival = False
         ):
         """
         Args:
@@ -55,24 +56,37 @@ class Generic_WSI_Classification_Dataset(Dataset):
         self.patient_strat = patient_strat
         self.train_ids, self.val_ids, self.test_ids  = (None, None, None)
         self.data_dir = None
+        self.cox_survival = cox_survival
+
         if not label_col:
             label_col = 'label'
         self.label_col = label_col
 
         slide_data = pd.read_csv(csv_path)
         slide_data = self.filter_df(slide_data, filter_dict)
-        slide_data, self.label_dict = self.df_prep(slide_data, label_dict, ignore, self.label_col)
-        self.num_classes = len(set(self.label_dict.values()))
+
+        if not self.cox_survival:
+            slide_data, self.label_dict = self.df_prep(slide_data, label_dict, ignore, self.label_col)
+            self.num_classes = len(set(self.label_dict.values()))
+        else:
+            self.label_dict = {}
+            self.num_classes = 0 # Survival usually treats the output as a single risk score
 
         ###shuffle data
         if shuffle:
             np.random.seed(seed)
-            np.random.shuffle(slide_data)
+            # Standard way to shuffle a dataframe in pandas
+            slide_data = slide_data.sample(frac=1, random_state=seed).reset_index(drop=True)
 
         self.slide_data = slide_data
 
-        self.patient_data_prep(patient_voting)
-        self.cls_ids_prep()
+        if not self.cox_survival:
+            self.patient_data_prep(patient_voting)
+            self.cls_ids_prep()
+        else:
+            # For survival, we usually don't have discrete class IDs for splitting
+            self.patient_cls_ids = []
+            self.slide_cls_ids = []
 
         if print_info:
             self.summarize()
@@ -126,12 +140,11 @@ class Generic_WSI_Classification_Dataset(Dataset):
             key = data.loc[i, 'label']
             data.at[i, 'label'] = label_dict[key]
 
-        return data, label_dict # Return the dict so the class can store it
+        return data, label_dict
 
     def filter_df(self, df, filter_dict={}):
         if len(filter_dict) > 0:
             filter_mask = np.full(len(df), True, bool)
-            # assert 'label' not in filter_dict.keys()
             for key, val in filter_dict.items():
                 mask = df[key].isin(val)
                 filter_mask = np.logical_and(filter_mask, mask)
@@ -139,13 +152,17 @@ class Generic_WSI_Classification_Dataset(Dataset):
         return df
 
     def __len__(self):
-        if self.patient_strat:
+        if self.patient_strat and not self.cox_survival:
             return len(self.patient_data['case_id'])
-
         else:
             return len(self.slide_data)
 
     def summarize(self):
+        if self.cox_survival:
+            print("Cox Survival Mode: skipping categorical summary.")
+            print("Number of samples: {}".format(len(self.slide_data)))
+            return
+
         print("label column: {}".format(self.label_col))
         print("label dictionary: {}".format(self.label_dict))
         print("number of classes: {}".format(self.num_classes))
@@ -164,7 +181,7 @@ class Generic_WSI_Classification_Dataset(Dataset):
                     'custom_test_ids': custom_test_ids
                     }
 
-        if self.patient_strat:
+        if self.patient_strat and not self.cox_survival:
             settings.update({'cls_ids' : self.patient_cls_ids, 'samples': len(self.patient_data['case_id'])})
         else:
             settings.update({'cls_ids' : self.slide_cls_ids, 'samples': len(self.slide_data)})
@@ -174,21 +191,17 @@ class Generic_WSI_Classification_Dataset(Dataset):
     def set_splits(self,start_from=None):
         if start_from:
             ids = nth(self.split_gen, start_from)
-
         else:
             ids = next(self.split_gen)
 
-        if self.patient_strat:
+        if self.patient_strat and not self.cox_survival:
             slide_ids = [[] for i in range(len(ids))]
-
             for split in range(len(ids)):
                 for idx in ids[split]:
                     case_id = self.patient_data['case_id'][idx]
                     slide_indices = self.slide_data[self.slide_data['case_id'] == case_id].index.tolist()
                     slide_ids[split].extend(slide_indices)
-
             self.train_ids, self.val_ids, self.test_ids = slide_ids[0], slide_ids[1], slide_ids[2]
-
         else:
             self.train_ids, self.val_ids, self.test_ids = ids
 
@@ -199,10 +212,10 @@ class Generic_WSI_Classification_Dataset(Dataset):
         if len(split) > 0:
             mask = self.slide_data['slide_id'].isin(split.tolist())
             df_slice = self.slide_data[mask].reset_index(drop=True)
-            split = Generic_Split(df_slice, data_dir=self.data_dir, num_classes=self.num_classes, bag_dropout=args.bag_dropout)
+            # PASS FLAG DOWN
+            split = Generic_Split(df_slice, data_dir=self.data_dir, num_classes=self.num_classes, bag_dropout=args.bag_dropout, cox_survival=self.cox_survival)
         else:
             split = None
-
         return split
 
     def get_merged_split_from_df(self, all_splits, split_keys=['train']):
@@ -212,61 +225,47 @@ class Generic_WSI_Classification_Dataset(Dataset):
             split = split.dropna().reset_index(drop=True).tolist()
             merged_split.extend(split)
 
-        if len(split) > 0:
+        if len(merged_split) > 0:
             mask = self.slide_data['slide_id'].isin(merged_split)
             df_slice = self.slide_data[mask].reset_index(drop=True)
-            split = Generic_Split(df_slice, data_dir=self.data_dir, num_classes=self.num_classes)
+            split = Generic_Split(df_slice, data_dir=self.data_dir, num_classes=self.num_classes, cox_survival=self.cox_survival)
         else:
             split = None
-
         return split
 
-
     def return_splits(self, args, from_id=True, csv_path=None):
-
-
         if from_id:
-            if len(self.train_ids) > 0:
-                train_data = self.slide_data.loc[self.train_ids].reset_index(drop=True)
-                train_split = Generic_Split(train_data, data_dir=self.data_dir, num_classes=self.num_classes, bag_dropout=args.bag_dropout)
-
-            else:
-                train_split = None
-
-            if len(self.val_ids) > 0:
-                val_data = self.slide_data.loc[self.val_ids].reset_index(drop=True)
-                val_split = Generic_Split(val_data, data_dir=self.data_dir, num_classes=self.num_classes, bag_dropout=args.bag_dropout)
-
-            else:
-                val_split = None
-
-            if len(self.test_ids) > 0:
-                test_data = self.slide_data.loc[self.test_ids].reset_index(drop=True)
-                test_split = Generic_Split(test_data, data_dir=self.data_dir, num_classes=self.num_classes, bag_dropout=args.bag_dropout)
-
-            else:
-                test_split = None
-
+            datasets = []
+            for ids in [self.train_ids, self.val_ids, self.test_ids]:
+                if ids is not None and len(ids) > 0:
+                    train_data = self.slide_data.loc[ids].reset_index(drop=True)
+                    datasets.append(Generic_Split(train_data, data_dir=self.data_dir, num_classes=self.num_classes, bag_dropout=args.bag_dropout, cox_survival=self.cox_survival))
+                else:
+                    datasets.append(None)
+            return datasets[0], datasets[1], datasets[2]
 
         else:
             assert csv_path
-            all_splits = pd.read_csv(csv_path, dtype=self.slide_data['slide_id'].dtype)  # Without "dtype=self.slide_data['slide_id'].dtype", read_csv() will convert all-number columns to a numerical type. Even if we convert numerical columns back to objects later, we may lose zero-padding in the process; the columns must be correctly read in from the get-go. When we compare the individual train/val/test columns to self.slide_data['slide_id'] in the get_split_from_df() method, we cannot compare objects (strings) to numbers or even to incorrectly zero-padded objects/strings. An example of this breaking is shown in https://github.com/andrew-weisman/clam_analysis/tree/main/datatype_comparison_bug-2021-12-01.
+            all_splits = pd.read_csv(csv_path, dtype=self.slide_data['slide_id'].dtype)
             train_split = self.get_split_from_df(args, all_splits, 'train')
             val_split = self.get_split_from_df(args, all_splits, 'val')
             test_split = self.get_split_from_df(args, all_splits, 'test')
-
-        return train_split, val_split, test_split
+            return train_split, val_split, test_split
 
     def get_list(self, ids):
         return self.slide_data['slide_id'][ids]
 
     def getlabel(self, ids):
-        return self.slide_data['label'][ids]
+        # Note: If survival, this might not be used the same way
+        return self.slide_data['label'][ids] if not self.cox_survival else None
 
     def __getitem__(self, idx):
         return None
 
     def test_split_gen(self, return_descriptor=False):
+        if self.cox_survival:
+            print("test_split_gen skipped for survival mode.")
+            return None
 
         if return_descriptor:
             index = [list(self.label_dict.keys())[list(self.label_dict.values()).index(i)] for i in range(self.num_classes)]
@@ -274,36 +273,15 @@ class Generic_WSI_Classification_Dataset(Dataset):
             df = pd.DataFrame(np.full((len(index), len(columns)), 0, dtype=np.int32), index= index,
                             columns= columns)
 
-        count = len(self.train_ids)
-        print('\nnumber of training samples: {}'.format(count))
-        labels = self.getlabel(self.train_ids)
-        unique, counts = np.unique(labels, return_counts=True)
-        for u in range(len(unique)):
-            print('number of samples in cls {}: {}'.format(unique[u], counts[u]))
-            if return_descriptor:
-                df.loc[index[u], 'train'] = counts[u]
-
-        count = len(self.val_ids)
-        print('\nnumber of val samples: {}'.format(count))
-        labels = self.getlabel(self.val_ids)
-        unique, counts = np.unique(labels, return_counts=True)
-        for u in range(len(unique)):
-            print('number of samples in cls {}: {}'.format(unique[u], counts[u]))
-            if return_descriptor:
-                df.loc[index[u], 'val'] = counts[u]
-
-        count = len(self.test_ids)
-        print('\nnumber of test samples: {}'.format(count))
-        labels = self.getlabel(self.test_ids)
-        unique, counts = np.unique(labels, return_counts=True)
-        for u in range(len(unique)):
-            print('number of samples in cls {}: {}'.format(unique[u], counts[u]))
-            if return_descriptor:
-                df.loc[index[u], 'test'] = counts[u]
-
-        assert len(np.intersect1d(self.train_ids, self.test_ids)) == 0
-        assert len(np.intersect1d(self.train_ids, self.val_ids)) == 0
-        assert len(np.intersect1d(self.val_ids, self.test_ids)) == 0
+        for name, ids in [('train', self.train_ids), ('val', self.val_ids), ('test', self.test_ids)]:
+            count = len(ids)
+            print(f'\nnumber of {name} samples: {count}')
+            labels = self.getlabel(ids)
+            unique, counts = np.unique(labels, return_counts=True)
+            for u in range(len(unique)):
+                print('number of samples in cls {}: {}'.format(unique[u], counts[u]))
+                if return_descriptor:
+                    df.loc[index[u], name] = counts[u]
 
         if return_descriptor:
             return df
@@ -326,11 +304,10 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
         cox_survival = False,
         **kwargs):
 
-        super(Generic_MIL_Dataset, self).__init__(**kwargs)
+        super(Generic_MIL_Dataset, self).__init__(cox_survival=cox_survival, **kwargs)
         self.data_dir = data_dir
         self.use_h5 = False
         self.bag_dropout = bag_dropout
-        self.cox_survival = cox_survival # New flag
 
     def load_from_h5(self, toggle):
         self.use_h5 = toggle
@@ -354,32 +331,21 @@ class Generic_MIL_Dataset(Generic_WSI_Classification_Dataset):
             data_dir = self.data_dir
 
         if not self.use_h5:
-            if self.data_dir:
-                full_path = os.path.join(data_dir, 'pt_files', '{}.pt'.format(slide_id))
-                features = torch.load(full_path)
+            full_path = os.path.join(data_dir, 'pt_files', '{}.pt'.format(slide_id))
+            features = torch.load(full_path)
 
-                if self.bag_dropout > 0:
-                    num_patches = features.shape[0]
-                    # Calculate how many to keep (e.g., if dropout is 0.2, keep 80%)
-                    keep_num = int(num_patches * (1 - self.bag_dropout))
-
-                    # Ensure we keep at least one patch!
-                    keep_num = max(1, keep_num)
-
-                    indices = torch.randperm(num_patches)[:keep_num]
-                    features = features[indices]
-                return features, label
-
-            else:
-                return slide_id, label
+            if self.bag_dropout > 0:
+                num_patches = features.shape[0]
+                keep_num = max(1, int(num_patches * (1 - self.bag_dropout)))
+                indices = torch.randperm(num_patches)[:keep_num]
+                features = features[indices]
+            return features, label
 
         else:
             full_path = os.path.join(data_dir,'h5_files','{}.h5'.format(slide_id))
             with h5py.File(full_path,'r') as hdf5_file:
-                features = hdf5_file['features'][:]
+                features = torch.from_numpy(hdf5_file['features'][:])
                 coords = hdf5_file['coords'][:]
-
-            features = torch.from_numpy(features)
             return features, label, coords
 
 class Generic_Split(Generic_MIL_Dataset):
@@ -395,7 +361,7 @@ class Generic_Split(Generic_MIL_Dataset):
             for i in range(self.num_classes):
                 self.slide_cls_ids[i] = np.where(self.slide_data['label'] == i)[0]
         else:
-            self.slide_cls_ids = [] # Not used in survival sampling
+            self.slide_cls_ids = []
 
     def __len__(self):
         return len(self.slide_data)
