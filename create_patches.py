@@ -5,6 +5,8 @@ import pdb
 import time
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
+import traceback
+import sys
 
 import numpy as np
 import pandas as pd
@@ -25,7 +27,6 @@ def stitching(file_path, downscale = 64):
 def segment(WSI_object, seg_params, filter_params):
     ### Start Seg Timer
     start_time = time.time()
-
     # Segment
     WSI_object.segmentTissue(**seg_params, filter_params=filter_params)
 
@@ -175,14 +176,17 @@ def process_single_slide(idx, df, source, patch_save_dir, mask_save_dir, stitch_
         result_status['stitch_t'] = stitch_time_elapsed
 
     except Exception as e:
-        print(f"Failed to process {slide}: {e}")
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        # Extract the line number from the traceback
+        line_number = exc_traceback.tb_lineno
+        print(f"Failed to process {slide}: {e} at line: {line_number}")
         result_status['status'] = 'failed'
 
     return result_status
 
 def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_dir,
                   patch_size = 256, step_size = 256, custom_downsample=1,
-                  seg_params = {'seg_level': -1, 'sthresh': 130, 'mthresh': 5, 'close': 4, 'use_otsu': False,
+                  seg_params = {'seg_level': -1, 'sthresh': 130, 'mthresh': 10, 'close': 4, 'use_otsu': False, 'use_lab': False, 'lab_channel': 1,
                   'keep_ids': 'none', 'exclude_ids': 'none'},
                   filter_params = {'a_t':25, 'a_h': 16, 'max_n_holes':8 },
                   vis_params = {'vis_level': -1, 'line_thickness': 250},
@@ -191,7 +195,7 @@ def seg_and_patch(source, save_dir, patch_save_dir, mask_save_dir, stitch_save_d
                   use_default_params = False,
                   seg = False, save_mask = True,
                   stitch= False,
-                  patch = False, auto_skip=True, process_list = None, num_workers=96):
+                  patch = False, auto_skip=True, process_list = None, num_workers=10):
 
     slides = sorted(os.listdir(source))
     slides = [slide for slide in slides if os.path.isfile(os.path.join(source, slide))]
@@ -286,6 +290,14 @@ parser.add_argument('--custom_downsample', type= int, choices=[1,2], default=1,
 parser.add_argument('--process_list',  type = str, default=None,
                     help='name of list of images to process with parameters (.csv)')
 
+parser.add_argument('--use_otsu', default=False, action='store_true')
+parser.add_argument('--use_lab', default=False, action='store_true')
+parser.add_argument('--sthresh', type=int, default=130)
+parser.add_argument('--mthresh', type=int, default=5)
+parser.add_argument('--lab_channel', type= int, choices=[0,1,2], default=1,
+                    help='channel for lab color space the segmentation will use, recomended use 1 for HE and 2 for EVG')
+parser.add_argument('--num_workers', type= int, default=1)
+
 if __name__ == '__main__':
     args = parser.parse_args()
 
@@ -314,7 +326,7 @@ if __name__ == '__main__':
         if key not in ['source']:
             os.makedirs(val, exist_ok=True)
 
-    seg_params = {'seg_level': int(args.seg_level), 'sthresh': 130, 'mthresh': 5, 'close': 4, 'use_otsu': False,
+    seg_params = {'seg_level': int(args.seg_level), 'sthresh': args.sthresh, 'mthresh': args.mthresh, 'close': 4, 'use_otsu': args.use_otsu, 'use_lab': args.use_lab, 'lab_channel':args.lab_channel,
                   'keep_ids': 'none', 'exclude_ids': 'none'}
     filter_params = {'a_t':4, 'a_h': 16, 'max_n_holes':8 }
     vis_params = {'vis_level': -1, 'line_thickness': 250}
@@ -346,4 +358,4 @@ if __name__ == '__main__':
                                             seg = args.seg,  use_default_params=False, save_mask = True,
                                             stitch= args.stitch, custom_downsample = args.custom_downsample,
                                             patch_level=args.patch_level, patch = args.patch,
-                                            process_list = process_list, auto_skip=args.auto_skip)
+                                            process_list = process_list, auto_skip=args.auto_skip, num_workers=args.num_workers)
