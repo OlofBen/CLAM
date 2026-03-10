@@ -33,8 +33,18 @@ class SubsetSequentialSampler(Sampler):
         return len(self.indices)
 
 def collate_MIL(batch):
-    img = torch.cat([item[0] for item in batch], dim = 0)
-    label = torch.LongTensor([item[1] for item in batch])
+    img = torch.cat([item[0] for item in batch], dim=0)
+
+    # Check if the label is a sequence/tensor (survival) or a single int (classification)
+    if isinstance(batch[0][1], (list, np.ndarray, torch.Tensor)):
+        # Survival case: [time, event]
+        # We convert to numpy first to handle varying input types, then to tensor
+        label_list = [torch.tensor(item[1]) if not isinstance(item[1], torch.Tensor) else item[1] for item in batch]
+        label = torch.stack(label_list, dim=0).float()
+    else:
+        # Standard classification case: [class_int]
+        label = torch.LongTensor([item[1] for item in batch])
+
     return [img, label]
 
 def collate_features(batch):

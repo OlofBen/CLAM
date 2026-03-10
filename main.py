@@ -26,15 +26,11 @@ def main(args):
     if not os.path.isdir(args.results_dir):
         os.mkdir(args.results_dir)
 
-    if args.k_start == -1:
-        start = 0
-    else:
-        start = args.k_start
-    if args.k_end == -1:
-        end = args.k
-    else:
-        end = args.k_end
-    # 1. Initialize new metric lists
+    start = 0 if args.k_start == -1 else args.k_start
+    end = args.k if args.k_end == -1 else args.k_end
+
+    # 1. Initialize metric lists
+    # In survival mode, we use 'auc' lists to store C-Index for consistency
     all_test_auc, all_val_auc = [], []
     all_test_acc, all_val_acc = [], []
     all_test_f1, all_val_f1 = [], []
@@ -49,9 +45,10 @@ def main(args):
 
         datasets = (train_dataset, val_dataset, test_dataset)
 
-        # 2. Unpack the new metrics from your train function
-        # Note: Ensure your train() function is updated to return these!
-        val_results, test_results, test_auc, val_auc, test_acc, val_acc, test_f1, val_f1, test_prec, val_prec, test_recall, val_recall = train(datasets, i, args)
+        # 2. Unpack metrics
+        # The core_utils.train function now returns C-Index in the 3rd and 4th slots if survival=True
+        (val_results, test_results, test_auc, val_auc, test_acc, val_acc,
+         test_f1, val_f1, test_prec, val_prec, test_recall, val_recall) = train(datasets, i, args)
 
         all_test_auc.append(test_auc)
         all_val_auc.append(val_auc)
@@ -64,28 +61,28 @@ def main(args):
         all_test_recall.append(test_recall)
         all_val_recall.append(val_recall)
 
-        combined_results = {
-            'test': test_results,
-            'val': val_results
-        }
-
-        # Write results to pkl
+        combined_results = {'test': test_results, 'val': val_results}
         filename = os.path.join(args.results_dir, 'split_{}_results.pkl'.format(i))
         save_pkl(filename, combined_results)
 
-    # 3. Add to the Summary DataFrame
-    final_df = pd.DataFrame({
+    # 3. Create Summary DataFrame
+    # If survival, rename 'auc' columns to 'c_index' for clarity in the CSV
+    summary_columns = {
         'folds': folds,
-        'test_auc': all_test_auc, 'val_auc': all_val_auc,
-        'test_acc': all_test_acc, 'val_acc' : all_val_acc,
-        'test_f1': all_test_f1, 'val_f1': all_val_f1,
-        'test_precision': all_test_precision, 'val_precision': all_val_precision,
-        'test_recall': all_test_recall, 'val_recall': all_val_recall,
-    })
-    if len(folds) != args.k:
-        save_name = 'summary_partial_{}_{}.csv'.format(start, end)
-    else:
-        save_name = 'summary.csv'
+        'test_auc' if not args.cox_survival else 'test_c_index': all_test_auc,
+        'val_auc' if not args.cox_survival else 'val_c_index': all_val_auc,
+    }
+
+    if not args.cox_survival:
+        summary_columns.update({
+            'test_acc': all_test_acc, 'val_acc' : all_val_acc,
+            'test_f1': all_test_f1, 'val_f1': all_val_f1,
+            'test_precision': all_test_precision, 'val_precision': all_val_precision,
+            'test_recall': all_test_recall, 'val_recall': all_val_recall,
+        })
+
+    final_df = pd.DataFrame(summary_columns)
+    save_name = 'summary.csv' if len(folds) == args.k else 'summary_partial_{}_{}.csv'.format(start, end)
     final_df.to_csv(os.path.join(args.results_dir, save_name))
 
 # Generic training settings
@@ -136,6 +133,8 @@ parser.add_argument('--bag_weight', type=float, default=0.7,
 parser.add_argument('--B', type=int, default=8, help='numbr of positive/negative patches to sample for clam')
 parser.add_argument('--bag_dropout', type=float, default=0.2, help='dropout over each bag of patches')
 parser.add_argument('--accumilation_steps', type=int, default=1, help='backward iterations before optimizer step')
+parser.add_argument('--cox_survival', action='store_true', default=False,
+                    help='Enable Cox Survival Analysis mode')
 args = parser.parse_args()
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -152,6 +151,9 @@ def seed_torch(seed=7):
     torch.backends.cudnn.deterministic = True
 
 seed_torch(args.seed)
+
+if args.cox_survival:
+    args.n_classes = 1 # Cox head is always a single output node
 
 encoding_size = args.embed_dim
 settings = {'num_splits': args.k,
@@ -187,7 +189,8 @@ dataset = Generic_MIL_Dataset(csv_path = os.path.join('dataset_csv', '%s.csv' % 
                               seed = args.seed,
                               print_info = True,
                               patient_strat=False,
-                              bag_dropout=args.bag_dropout)
+                              bag_dropout=args.bag_dropout,
+                              cox_survival=args.cox_survival)
 
 if not os.path.isdir(args.results_dir):
     os.mkdir(args.results_dir)
