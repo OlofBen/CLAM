@@ -169,6 +169,31 @@ def get_encoder(model_name, target_img_size=224, trust_remote_code = False):
     # 5. Hugging Face AutoModel Fallback
     # -----------------------------------------------------------
     print(f"Attempting to load {model_name} from Hugging Face...")
+
+    # --- SPECIFIC HANDLER FOR MEDSIGLIP ---
+    if "medsiglip" in model_name:
+        try:
+            model = HFEncoderWrapper(model_name, trust_remote_code)
+            processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=trust_remote_code)
+
+            img_proc = getattr(processor, "image_processor", processor)
+            mean = getattr(img_proc, "image_mean", [0.485, 0.456, 0.406])
+            std = getattr(img_proc, "image_std", [0.229, 0.224, 0.225])
+
+            img_transforms = get_eval_transforms(
+                mean=mean,
+                std=std,
+                target_img_size=target_img_size
+            )
+            print(f"Successfully loaded processor for {model_name}")
+            print(f"Successfully loaded HF model: {model_name}")
+            return model, img_transforms
+
+        except Exception as e:
+            print(f"MedSigLIP specific load failed: {e}")
+            raise NotImplementedError(f'Failed to load specialized medsiglip model: {model_name}')
+    # --------------------------------------
+
     try:
         model = HFEncoderWrapper(model_name, trust_remote_code)
 
@@ -184,11 +209,12 @@ def get_encoder(model_name, target_img_size=224, trust_remote_code = False):
             print(f"No config found for {model_name}. Using default DINOv2/ImageNet transforms.")
             mean = [0.485, 0.456, 0.406]
             std = [0.229, 0.224, 0.225]
-            img_transforms = get_eval_transforms(
-                mean=mean,
-                std= std,
-                target_img_size=target_img_size
-            )
+
+        img_transforms = get_eval_transforms(
+            mean=mean,
+            std= std,
+            target_img_size=target_img_size
+        )
 
         print(f"Successfully loaded HF model: {model_name}")
         return model, img_transforms
