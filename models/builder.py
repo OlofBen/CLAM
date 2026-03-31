@@ -84,6 +84,19 @@ class UNI2Wrapper(nn.Module):
     def forward(self, x):
         return self.model(x)
 
+class MedSigLIPWrapper(nn.Module):
+    def __init__(self, model_id="google/medsiglip-448"):
+        super().__init__()
+        self.model = AutoModel.from_pretrained(model_id)
+
+    # Extract the projected, pooled 2D image embeddings [Batch, 1152]
+    def forward(self, x):
+        vision_outputs = self.model.vision_model(pixel_values=x)
+
+        # 2. Explicitly extract the bare PyTorch tensor from the HF Dataclass
+        image_embeds = vision_outputs.pooler_output
+
+        return image_embeds
 
 
 def get_encoder(model_name, target_img_size=224, trust_remote_code = False):
@@ -170,12 +183,11 @@ def get_encoder(model_name, target_img_size=224, trust_remote_code = False):
     # -----------------------------------------------------------
     print(f"Attempting to load {model_name} from Hugging Face...")
 
-    # --- SPECIFIC HANDLER FOR MEDSIGLIP ---
     if "medsiglip" in model_name:
         try:
-            model = HFEncoderWrapper(model_name, trust_remote_code)
-            processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=trust_remote_code)
+            model = MedSigLIPWrapper(model_name)
 
+            processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=trust_remote_code)
             img_proc = getattr(processor, "image_processor", processor)
             mean = getattr(img_proc, "image_mean", [0.485, 0.456, 0.406])
             std = getattr(img_proc, "image_std", [0.229, 0.224, 0.225])
@@ -186,7 +198,7 @@ def get_encoder(model_name, target_img_size=224, trust_remote_code = False):
                 target_img_size=target_img_size
             )
             print(f"Successfully loaded processor for {model_name}")
-            print(f"Successfully loaded HF model: {model_name}")
+            print(f"Successfully loaded specialized MedSigLIPWrapper: {model_name}")
             return model, img_transforms
 
         except Exception as e:
