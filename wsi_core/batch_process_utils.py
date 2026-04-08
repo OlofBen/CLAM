@@ -36,6 +36,8 @@ def initialize_df(slides, seg_params, filter_params, vis_params, patch_params,
         'mthresh': np.full((total), int(seg_params['mthresh']), dtype=np.uint8),
         'close': np.full((total), int(seg_params['close']), dtype=np.uint32),
         'use_otsu': np.full((total), bool(seg_params['use_otsu']), dtype=bool),
+        'use_lab': np.full((total), bool(seg_params['use_lab']), dtype=bool),
+        'lab_channel': np.full((total), int(seg_params['lab_channel']), dtype=np.uint8),
         'keep_ids': np.full((total), seg_params['keep_ids']),
         'exclude_ids': np.full((total), seg_params['exclude_ids']),
 
